@@ -12,7 +12,7 @@ repos à -52 mV).
 """
 import os, re, time
 import numpy as np
-import pyarrow.feather as feather
+import pyarrow.ipc as ipc        # Feather v2 = format de fichier IPC d'Arrow
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ANN_FILE = "body-annotations-male-cns-v1.0-minconf-0.5.feather"
@@ -63,7 +63,7 @@ class Connectome:
     def _load_meta(self, d):
         cols = ["bodyId", "type", "instance", "superclass", "class", "subclass",
                 "somaSide", "rootSide", "somaLocation"]
-        t = feather.read_table(os.path.join(d, ANN_FILE), columns=cols).to_pydict()
+        t = ipc.open_file(os.path.join(d, ANN_FILE)).read_all().select(cols).to_pydict()
         pos_in = np.searchsorted(t["bodyId"], self.body)
         def get(c):
             v = t[c]

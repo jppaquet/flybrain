@@ -260,6 +260,6 @@ if __name__ == "__main__":
     C = engine.Connectome()
     Handler.C, Handler.jobs, Handler.meta, Handler.live = C, Jobs(C), build_meta(C), live.Live(C)
     srv = ThreadingHTTPServer((a.host, a.port), Handler)
-    print(f"dashboard prêt : http://{a.host}:{a.port}")
+    print(f"dashboard prêt : http://{a.host}:{a.port}   ·   mouche 3D : http://{a.host}:{a.port}/fly")
     try: srv.serve_forever()
     except KeyboardInterrupt: pass

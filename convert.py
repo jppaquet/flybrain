@@ -10,8 +10,8 @@ Usage: python convert.py [dossier]
 """
 import sys, os, csv
 import numpy as np
-import pyarrow.feather as feather
 import pyarrow as pa
+import pyarrow.ipc as ipc        # Feather v2 = format de fichier IPC d'Arrow
 
 D = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.abspath(__file__))
 W_FILE  = os.path.join(D, "connectome-weights-male-cns-v1.0-minconf-0.5.feather")
@@ -36,7 +36,7 @@ def show(name, tbl):
 
 # ---------------------------------------------------------------- annotations
 print("Lecture des annotations…")
-ann = feather.read_table(A_FILE)
+ann = ipc.open_file(A_FILE).read_all()
 show("body-annotations", ann)
 acols = ann.schema.names
 c_body  = pick(acols, "body", "bodyid", "body_id", contains=["body"])
@@ -82,7 +82,7 @@ N = len(bodies)
 nt = [""] * N
 if os.path.exists(NT_FILE):
     print("Lecture des neurotransmetteurs…")
-    ntt = feather.read_table(NT_FILE)
+    ntt = ipc.open_file(NT_FILE).read_all()
     show("body-neurotransmitters", ntt)
     ncols = ntt.schema.names
     n_body = pick(ncols, "body", "bodyid", "body_id", contains=["body"])
@@ -102,23 +102,32 @@ for i, v in enumerate(nt):
 print(f"  {(sign < 0).sum():,} neurones inhibiteurs / {N:,}")
 
 # ------------------------------------------------------------------- connexions
-print("Lecture du graphe de connexions (gros fichier, patience)…")
-w = feather.read_table(W_FILE)
-show("connectome-weights", w)
-wcols = w.schema.names
-c_pre  = pick(wcols, "body_pre", "bodyid_pre", "pre", "pre_id", contains=["pre"])
-c_post = pick(wcols, "body_post", "bodyid_post", "post", "post_id", contains=["post"])
-c_w    = pick(wcols, "weight", "count", "syn_count", contains=["weight"])
-print(f"  -> pre={c_pre} post={c_post} weight={c_w}")
-
-pre  = np.asarray(w.column(c_pre).to_numpy(zero_copy_only=False),  dtype=np.int64)
-post = np.asarray(w.column(c_post).to_numpy(zero_copy_only=False), dtype=np.int64)
-wgt  = np.asarray(w.column(c_w).to_numpy(zero_copy_only=False),    dtype=np.int32)
-del w
-print(f"  {len(pre):,} paires brutes")
-
-m = wgt >= MIN_WEIGHT
-pre, post, wgt = pre[m], post[m], wgt[m]
+# lecture lot par lot, filtrée au fil de l'eau : ~1 Go de RAM au lieu de ~10 Go
+print("Lecture du graphe de connexions (gros fichier, lu par lots)…")
+with pa.memory_map(W_FILE) as src:
+    rd = ipc.open_file(src)
+    wcols = rd.schema.names
+    print(f"\n[connectome-weights] {rd.num_record_batches:,} lots")
+    for f in rd.schema:
+        print(f"    {f.name:<28} {f.type}")
+    c_pre  = pick(wcols, "body_pre", "bodyid_pre", "pre", "pre_id", contains=["pre"])
+    c_post = pick(wcols, "body_post", "bodyid_post", "post", "post_id", contains=["post"])
+    c_w    = pick(wcols, "weight", "count", "syn_count", contains=["weight"])
+    print(f"  -> pre={c_pre} post={c_post} weight={c_w}")
+    i_pre, i_post, i_w = (rd.schema.get_field_index(c) for c in (c_pre, c_post, c_w))
+    parts, n_raw = [], 0
+    for k in range(rd.num_record_batches):
+        b = rd.get_batch(k)
+        wb = b.column(i_w).to_numpy(zero_copy_only=False)
+        n_raw += len(wb)
+        m = wb >= MIN_WEIGHT
+        if m.any():
+            parts.append((np.asarray(b.column(i_pre).to_numpy(zero_copy_only=False)[m], dtype=np.int64),
+                          np.asarray(b.column(i_post).to_numpy(zero_copy_only=False)[m], dtype=np.int64),
+                          np.asarray(wb[m], dtype=np.int32)))
+pre, post, wgt = (np.concatenate([p[j] for p in parts]) for j in range(3))
+del parts
+print(f"  {n_raw:,} paires brutes")
 print(f"  {len(pre):,} paires avec weight >= {MIN_WEIGHT}")
 
 ip = np.searchsorted(bodies, pre);  ip_ok = (ip < N) & (bodies[np.clip(ip, 0, N-1)] == pre)
