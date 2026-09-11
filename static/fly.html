@@ -59,12 +59,14 @@
       <div class="params live-params">
         <label class="field">Échelle des poids <input type="number" id="live-w" step="0.05" min="0.05" value="0.5"></label>
         <label class="field">dt (ms) <input type="number" id="live-dt" step="0.05" min="0.05" value="0.2"></label>
-        <label class="field">Dépression U <input type="number" id="live-u" step="0.05" min="0" max="0.9" value="0.2"></label>
-        <label class="field">τ récupération (ms) <input type="number" id="live-tau" step="50" min="10" value="400"></label>
+        <label class="field">Dépression U <input type="number" id="live-u" step="0.01" min="0" max="0.9" value="0"></label>
+        <label class="field">τ récupération (ms) <input type="number" id="live-tau" step="50" min="10" value="200"></label>
       </div>
+      <label class="check"><input type="checkbox" id="live-quench" checked> Garde-fou : remettre au repos si l'activité persiste 1 s sans stimulus</label>
       <p class="note">Échelle 0,5 : compense la densité synaptique de MaleCNS (à 1, l'activité s'emballe).
-        Dépression synaptique : chaque décharge épuise un peu les synapses du neurone, ce qui éteint les
-        réverbérations sans fin (U = 0 : modèle de Shiu d'origine).</p>
+        Même ainsi, certains stimuli (son, goût) font basculer le réseau dans un état auto-entretenu, surtout
+        dans le complexe central : le garde-fou l'éteint et le signale. La dépression synaptique (U &gt; 0)
+        l'évite aussi, mais coupe les voies qui demandent des décharges rapides (TTMn, MN9).</p>
       <h4 class="sub-h">Stimuli sensoriels</h4>
       <div class="ev-btns" id="ev-sens"><span class="hint">démarre la simulation</span></div>
       <h4 class="sub-h">Activation directe (optogénétique)</h4>

@@ -159,6 +159,8 @@ def resolve_params(p):
     # dépression synaptique à court terme (0 = désactivée, comme Shiu et al.)
     q["std_u"] = min(max(float(p.get("std_u") or 0), 0.0), 0.9)
     q["std_tau"] = min(max(float(p.get("std_tau") or 300), 10.0), 5000.0)
+    # simulation continue : remise au repos si l'activité persiste sans stimulus (0 = jamais)
+    q["quench_ms"] = max(float(p.get("quench_ms") or 0), 0.0)
     q["dt"] = min(max(q["dt"], 0.05), 1.0)
     return q
 
@@ -192,6 +194,13 @@ class Stepper:
 
     @property
     def t_ms(self): return self.s * self.q["dt"]
+
+    def quench(self):
+        """Remet le réseau au repos sans remettre l'horloge à zéro."""
+        self.v[:] = 0; self.g[:] = 0; self.until[:] = 0
+        if self.buf is not None: self.buf[:] = 0
+        self.pending = None
+        if self.res is not None: self.res[:] = 1
 
     def step(self, n, drive=(), record=None):
         """Avance de n pas. drive : [(idx, hz)] entrées de Poisson. Retourne les

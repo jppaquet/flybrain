@@ -60,6 +60,7 @@ export class BrainLink {
     let n = 0;
     while (F.length && F[0][0] <= this.tPlay) {
       const f = F.shift(); this.cur = f; n++;
+      if (f[5] && this.onNote) this.onNote(f[5]);
       const k = 1 - Math.exp(-10 / 30);
       f[1].forEach((r, i) => {
         const key = this.keys[i];
@@ -99,11 +100,12 @@ export class BodyController {
     const p = { ...base };
     const root = this.fly.root;
 
-    // --- saut : TTMn (motoneurone du muscle de saut, en aval de la fibre géante)
-    if (!this.jump && this.t - this.lastJump > 1.2 && ((raw.ttmn || 0) > 45 || (raw.gf || 0) > 180)) {
+    // --- saut : une décharge de TTMn (motoneurone du muscle de saut, en aval de la
+    //     fibre géante) suffit, comme chez la vraie mouche
+    if (!this.jump && this.t - this.lastJump > 1.2 && (raw.ttmn || 0) > 0) {
       this.jump = { t: 0, vx: Math.sin(this.yaw), vz: Math.cos(this.yaw) };
       this.lastJump = this.t;
-      this.note(`Saut · TTMn ${Math.round(raw.ttmn || 0)} Hz, fibre géante ${Math.round(raw.gf || 0)} Hz`);
+      this.note(`Saut : TTMn a déchargé (fibre géante à ${Math.round(S.gf || 0)} Hz)`);
     }
 
     // --- locomotion : DNp09 (avant), MDN (arrière), DNa01/02 (virage ipsilatéral)

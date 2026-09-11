@@ -88,12 +88,13 @@ const grid = new THREE.GridHelper(80, 160, 0x2c2c31, 0x1d1d21);   // repère au 
 grid.position.y = 0.001; scene.add(grid);
 
 const brain = new BrainLink(), body = new BodyController(fly);
+brain.onNote = txt => body.note(txt);
 let mode = "dance", lastAudio = 0;
 const lastRoot = new THREE.Vector3();
 function followCamera() {
-  const p = fly.root.position, dx = p.x - lastRoot.x, dz = p.z - lastRoot.z;
-  if (dx || dz) { controls.target.x += dx; controls.target.z += dz; camera.position.x += dx; camera.position.z += dz; }
-  lastRoot.set(p.x, 0, p.z);
+  const p = fly.root.position, d = p.clone().sub(lastRoot);
+  if (d.lengthSq()) { controls.target.add(d); camera.position.add(d); }
+  lastRoot.copy(p);
 }
 
 /* ---------------------------------------------------------------- caméra */
@@ -358,7 +359,8 @@ function brainChip() {
 }
 
 const liveParams = () => ({ model: "shiu", dt: +$("#live-dt").value, w_scale: +$("#live-w").value,
-                            std_u: +$("#live-u").value, std_tau: +$("#live-tau").value });
+                            std_u: +$("#live-u").value, std_tau: +$("#live-tau").value,
+                            quench_ms: $("#live-quench").checked ? 1000 : 0 });
 async function startLive(note) {
   try {
     status("Démarrage de la simulation…");

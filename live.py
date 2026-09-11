@@ -107,6 +107,7 @@ class Session:
     def _run(self):
         n = max(1, int(round(FRAME_MS / self.q["dt"])))
         w0, s0 = time.time(), self.sim.t_ms
+        quench_ms, last_input = self.q.get("quench_ms", 0.0), 0.0
         try:
             while not self.stop_ev.is_set():
                 if time.time() - self.last_poll > 20: break        # plus personne ne regarde
@@ -116,12 +117,20 @@ class Session:
                         del self.inputs[k]
                     drive = [(e["idx"], e["hz"]) for e in self.inputs.values()]
                     names = sorted(self.inputs)
+                    if names: last_input = now
                 t = time.time()
                 fired = self.sim.step(n, drive)
                 counts = np.bincount(fired, minlength=self.C.N)
                 k = 1000.0 / FRAME_MS
                 rates = [round(float(counts[c["idx"]].sum()) * k / len(c["idx"]), 1) for c in self.chans]
-                frame = [round(self.sim.t_ms, 1), rates, int(len(fired)), int(np.count_nonzero(counts)), names]
+                nact, note = int(np.count_nonzero(counts)), None
+                # garde-fou : le LIF uniforme tombe parfois dans un état auto-entretenu
+                # (surtout le complexe central) qui ne s'éteint jamais seul
+                if quench_ms and not names and nact > 20 and self.sim.t_ms - last_input > quench_ms:
+                    self.sim.quench(); last_input = self.sim.t_ms
+                    note = (f"Garde-fou : activité auto-entretenue éteinte ({nact} neurones encore actifs "
+                            f"{quench_ms / 1000:.1f} s après le dernier stimulus)").replace(".", ",")
+                frame = [round(self.sim.t_ms, 1), rates, int(len(fired)), nact, names, note]
                 with self.lock:
                     self.frames.append(frame)
                     if len(self.frames) > 6000:
