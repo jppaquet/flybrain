@@ -1,0 +1,17 @@
+# Données du connectome MaleCNS (téléchargées par setup.sh, ~1,2 Go) et fichiers dérivés
+*.feather
+malecns_graph.npz
+neurons.csv
+meta_cache.npz
+last_run.npz
+
+# Environnement Python
+.venv/
+__pycache__/
+*.pyc
+
+# Réglages locaux de Claude Code
+.claude/settings.local.json
+
+# Système
+.DS_Store

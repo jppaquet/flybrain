@@ -1,0 +1,87 @@
+/* Page « Mouche 3D » : la scène est volontairement sombre (piste de danse),
+   le panneau suit le thème via les jetons de style.css. */
+.fly-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: calc(100vh - 53px); }
+.stage { position: relative; background: #0b0b0d; overflow: hidden; min-height: 320px; }
+.stage canvas#gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.fly-panel { position: static; max-height: none; overflow-y: auto; border-right: 0; border-left: 1px solid var(--border); }
+
+.hud { position: absolute; left: 16px; top: 16px; display: flex; gap: 12px; align-items: center; }
+.chip {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;
+  background: rgba(18, 18, 20, 0.72); color: #fff; font-size: 13px; font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.12); backdrop-filter: blur(6px);
+}
+.chip .dot { width: 9px; height: 9px; border-radius: 50%; background: #898781; }
+.chip.dancing .dot { background: #3987e5; box-shadow: 0 0 0 3px rgba(57, 135, 229, 0.35); }
+.chip.listening .dot { background: #c3c2b7; }
+.beats { display: flex; gap: 6px; }
+.beats i { width: 10px; height: 10px; border-radius: 50%; background: rgba(255, 255, 255, 0.16); transition: background .08s; }
+.beats i.on { background: #fff; }
+
+.cams {
+  position: absolute; left: 16px; bottom: 16px; display: flex; border-radius: 8px; overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(18, 18, 20, 0.72); backdrop-filter: blur(6px);
+}
+.cams button { border: 0; border-radius: 0; background: transparent; color: #d8d7d0; padding: 5px 10px; font-size: 12.5px; }
+.cams button + button { border-left: 1px solid rgba(255, 255, 255, 0.12); }
+.cams button:hover { background: rgba(255, 255, 255, 0.08); }
+.cams button.on { background: rgba(255, 255, 255, 0.16); color: #fff; font-weight: 600; }
+.drop {
+  position: absolute; inset: 16px; border: 2px dashed rgba(255, 255, 255, 0.55); border-radius: 14px;
+  display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px;
+  background: rgba(0, 0, 0, 0.35); pointer-events: none;
+}
+.drop[hidden] { display: none; }
+
+.src-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.filebtn {
+  display: inline-flex; justify-content: center; align-items: center; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 7px; padding: 5px 10px; background: var(--surface);
+}
+.filebtn:hover { background: var(--surface-2); }
+.src-btns .on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
+#player { width: 100%; margin-top: 8px; height: 34px; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 12.5px; color: var(--ink-2); margin-top: 8px; }
+.fly-panel .field { margin-top: 10px; }
+.fly-panel .field input[type="range"] { width: 100%; accent-color: var(--accent); padding: 0; border: 0; }
+.lab { display: flex; justify-content: space-between; gap: 8px; }
+.lab .val { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.meter { position: relative; height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 16%, var(--surface-2)); }
+.meter-fill { height: 100%; width: 0; background: var(--accent); border-radius: 4px; }
+.meter-thr { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: var(--ink); }
+.meter-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.sig { width: 100%; height: 80px; display: block; margin-top: 10px; }
+.small-note { font-size: 11.5px; margin-top: 4px; }
+.joints { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.joints .field { margin-top: 8px; }
+code { font-size: 11.5px; background: var(--surface-2); padding: 0 4px; border-radius: 4px; }
+
+.mode-seg { display: flex; width: 100%; }
+.mode-seg button { flex: 1; padding: 5px 8px; }
+.live-params { grid-template-columns: 1fr 1fr; margin-top: 10px; }
+.sub-h { font-size: 12px; color: var(--ink-2); font-weight: 600; margin: 14px 0 6px; }
+.ev-btns { display: flex; flex-wrap: wrap; gap: 5px; }
+.ev-btns button { font-size: 12px; padding: 3px 8px; }
+.chan-bars { display: grid; grid-template-columns: minmax(0, auto) 1fr auto; gap: 3px 8px; align-items: center; font-size: 11.5px; }
+.chan-bars .g { grid-column: 1 / -1; color: var(--muted); font-size: 11px; margin-top: 6px; }
+.chan-bars .bar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 14%, var(--surface-2)); overflow: hidden; }
+.chan-bars .bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 3px; }
+.chan-bars .v { font-variant-numeric: tabular-nums; color: var(--ink-2); min-width: 46px; text-align: right; }
+.leg-grid { display: grid; grid-template-columns: 34px repeat(8, 1fr); gap: 2px; font-size: 10px; margin-top: 10px; }
+.leg-grid .h { color: var(--muted); text-align: center; line-height: 1.1; }
+.leg-grid .r { color: var(--ink-2); align-self: center; }
+.leg-grid .c { height: 16px; border-radius: 3px; background: var(--surface-2); }
+.leg-grid .c.na { background: transparent; border: 1px dashed var(--grid); }
+.evlog {
+  position: absolute; right: 16px; bottom: 16px; max-width: 380px; padding: 8px 12px; border-radius: 8px;
+  background: rgba(18, 18, 20, 0.72); color: #e8e7e1; font-size: 12px; line-height: 1.5;
+  border: 1px solid rgba(255, 255, 255, 0.12); backdrop-filter: blur(6px);
+}
+.evlog b { color: #fff; font-weight: 600; font-variant-numeric: tabular-nums; margin-right: 6px; }
+
+@media (max-width: 900px) {
+  .fly-layout { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .stage { height: 65vh; }
+  .fly-panel { border-left: 0; border-top: 1px solid var(--border); }
+}

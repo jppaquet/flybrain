@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flybrain · MaleCNS</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪰</text></svg>">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>flybrain</h1>
+    <nav class="nav"><a href="/" aria-current="page">Connectome</a><a href="/fly">Mouche 3D</a></nav>
+    <span class="sub" id="netstats">MaleCNS v1.0 · chargement…</span>
+  </div>
+  <div class="runbar">
+    <button id="run" class="primary" disabled>Simuler</button>
+    <button id="cancel" class="ghost" hidden>Annuler</button>
+    <div class="progress" aria-hidden="true"><div id="progbar"></div></div>
+    <span id="status" class="muted" role="status"></span>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="controls" aria-label="Paramètres de simulation">
+    <section>
+      <div class="sec-head"><h2>Stimulation</h2><span class="hint">entrée de Poisson</span></div>
+      <div id="stims" class="groups"></div>
+      <div class="row">
+        <select id="stim-preset" aria-label="Ajouter un préréglage de stimulation"><option value="">+ Préréglage…</option></select>
+        <button id="add-stim" class="ghost">+ Groupe</button>
+      </div>
+    </section>
+    <section>
+      <div class="sec-head"><h2>Readouts</h2><span class="hint">4 max.</span></div>
+      <div id="readouts" class="groups"></div>
+      <div class="row">
+        <select id="ro-preset" aria-label="Ajouter un préréglage de readout"><option value="">+ Préréglage…</option></select>
+        <button id="add-ro" class="ghost">+ Readout</button>
+      </div>
+    </section>
+    <section>
+      <div class="sec-head"><h2>Silenciation</h2><span class="hint">neurones retirés</span></div>
+      <div id="silence" class="groups"></div>
+    </section>
+    <section>
+      <div class="sec-head"><h2>Modèle</h2></div>
+      <label class="field wide">Dynamique
+        <select id="model">
+          <option value="shiu">Shiu et al. 2024 — conductance + délai</option>
+          <option value="simple">flysim — courant instantané</option>
+        </select>
+      </label>
+      <div class="params" id="params"></div>
+      <p class="note">v en mV au-dessus du repos (seuil 7 mV = −45 mV). Acétylcholine excitatrice, GABA et glutamate inhibiteurs.</p>
+    </section>
+  </aside>
+
+  <main id="results" class="empty">
+    <div class="kpis" id="kpis"></div>
+
+    <div class="grid-main">
+      <figure class="card" id="brain-card">
+        <figcaption>
+          <div>
+            <h3>Carte d'activité</h3>
+            <p class="muted" id="brain-sub">Position des somas, couleur = taux de décharge</p>
+          </div>
+          <div class="tools">
+            <div class="seg" id="view-seg" role="group" aria-label="Vue">
+              <button data-v="dorsal" class="on">Dorsale</button>
+              <button data-v="frontal">Frontale</button>
+              <button data-v="lateral">Latérale</button>
+            </div>
+          </div>
+        </figcaption>
+        <div class="canvas-wrap brain"><canvas id="brain"></canvas></div>
+        <div class="playbar">
+          <button id="play" class="ghost" aria-label="Lecture">▶</button>
+          <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Temps">
+          <span id="tlabel" class="mono">cumul</span>
+          <button id="cumul" class="ghost on" title="Afficher le taux sur toute la durée">Σ</button>
+        </div>
+        <div class="legend" id="brain-legend"></div>
+      </figure>
+
+      <div class="stack">
+        <figure class="card">
+          <figcaption><div><h3>Readouts</h3><p class="muted">Taux de population (Hz par neurone)</p></div>
+            <button class="ghost small" data-table="readout">Tableau</button></figcaption>
+          <div class="legend" id="ro-legend"></div>
+          <div class="canvas-wrap"><canvas id="ro-chart"></canvas></div>
+        </figure>
+        <figure class="card">
+          <figcaption><div><h3>Activité par groupe anatomique</h3><p class="muted">Hz par neurone · échelle propre à chaque panneau</p></div>
+            <button class="ghost small" data-table="groups">Tableau</button></figcaption>
+          <div class="canvas-wrap groups"><canvas id="groups-chart"></canvas></div>
+        </figure>
+      </div>
+    </div>
+
+    <figure class="card">
+      <figcaption>
+        <div><h3>Raster</h3><p class="muted" id="raster-sub">Essai 1 · stimulés, readouts puis les plus actifs</p></div>
+        <div class="legend inline" id="raster-legend"></div>
+      </figcaption>
+      <div class="canvas-wrap raster"><canvas id="raster"></canvas></div>
+    </figure>
+
+    <div class="grid-2">
+      <figure class="card">
+        <figcaption><div><h3>Neurones les plus actifs</h3><p class="muted">Clic : détail et connexions</p></div>
+          <input id="top-filter" type="search" placeholder="Filtrer (regex)…" aria-label="Filtrer les neurones"></figcaption>
+        <div class="table-wrap"><table id="top-table"></table></div>
+      </figure>
+      <figure class="card">
+        <figcaption><div><h3>Par type cellulaire</h3><p class="muted">Types avec au moins un neurone actif</p></div>
+          <input id="type-filter" type="search" placeholder="Filtrer (regex)…" aria-label="Filtrer les types"></figcaption>
+        <div class="table-wrap"><table id="type-table"></table></div>
+      </figure>
+    </div>
+
+    <div class="empty-note" id="empty-note">
+      <p>Choisis des neurones à stimuler, puis lance <strong>Simuler</strong>.</p>
+      <p class="muted">Par défaut : LC4 (détecteurs de looming) → fibre géante DNp01.</p>
+    </div>
+  </main>
+
+  <aside class="inspector" id="inspector" hidden aria-label="Détail du neurone">
+    <div class="insp-head">
+      <h3 id="insp-title"></h3>
+      <button class="ghost small" id="insp-close" aria-label="Fermer">✕</button>
+    </div>
+    <div id="insp-body"></div>
+  </aside>
+</div>
+
+<dialog id="table-dialog">
+  <div class="insp-head"><h3 id="td-title"></h3><button class="ghost small" id="td-close">✕</button></div>
+  <div class="table-wrap"><table id="td-table"></table></div>
+</dialog>
+<div id="tooltip" class="tooltip" hidden></div>
+
+<script src="/static/charts.js"></script>
+<script src="/static/results.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

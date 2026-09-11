@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flybrain · Mouche 3D</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪰</text></svg>">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/fly.css">
+<script type="importmap">
+{ "imports": { "three": "/static/vendor/three/three.module.min.js",
+               "three/addons/": "/static/vendor/three/addons/" } }
+</script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>flybrain</h1>
+    <nav class="nav"><a href="/">Connectome</a><a href="/fly" aria-current="page">Mouche 3D</a></nav>
+  </div>
+  <div class="runbar"><span id="fstatus" class="muted" role="status">Chargement…</span></div>
+</header>
+
+<div class="fly-layout">
+  <div class="stage" id="stage">
+    <canvas id="gl" aria-label="Mouche en 3D"></canvas>
+    <div class="hud">
+      <div class="chip" id="state-chip"><span class="dot"></span><span id="state-text">Aucune source audio</span></div>
+      <div class="beats" id="beats" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    </div>
+    <div class="cams" id="cams" role="group" aria-label="Caméra">
+      <button data-cam="rear" class="on">Arrière ¾</button>
+      <button data-cam="side">Profil</button>
+      <button data-cam="front">Face</button>
+      <button data-cam="top">Dessus</button>
+      <button id="autorot" title="Rotation automatique" aria-label="Rotation automatique">↻</button>
+    </div>
+    <div class="evlog" id="evlog" hidden></div>
+    <div class="drop" id="drop" hidden>Dépose un fichier audio pour la faire danser</div>
+  </div>
+
+  <aside class="controls fly-panel" aria-label="Contrôles">
+    <section>
+      <div class="sec-head"><h2>Pilotage</h2></div>
+      <div class="seg mode-seg" id="mode-seg" role="group" aria-label="Mode de pilotage">
+        <button data-mode="dance" class="on">Danse (son)</button>
+        <button data-mode="brain">Cerveau (connectome)</button>
+      </div>
+      <p class="note" id="mode-note">Chorégraphie calée sur le son : aucun neurone n'est simulé.</p>
+    </section>
+
+    <section id="brain-sec" hidden>
+      <div class="sec-head"><h2>Cerveau</h2><span class="hint" id="live-state">arrêté</span></div>
+      <div class="row">
+        <button id="live-start" class="primary">Démarrer la simulation</button>
+        <button id="live-zero" class="ghost" title="Repart d'un réseau au repos, mêmes paramètres">Remettre à zéro</button>
+        <button id="live-reset" class="ghost" title="Ramène la mouche au centre">Recentrer</button>
+      </div>
+      <div class="params live-params">
+        <label class="field">Échelle des poids <input type="number" id="live-w" step="0.05" min="0.05" value="0.5"></label>
+        <label class="field">dt (ms) <input type="number" id="live-dt" step="0.05" min="0.05" value="0.2"></label>
+        <label class="field">Dépression U <input type="number" id="live-u" step="0.05" min="0" max="0.9" value="0.2"></label>
+        <label class="field">τ récupération (ms) <input type="number" id="live-tau" step="50" min="10" value="400"></label>
+      </div>
+      <p class="note">Échelle 0,5 : compense la densité synaptique de MaleCNS (à 1, l'activité s'emballe).
+        Dépression synaptique : chaque décharge épuise un peu les synapses du neurone, ce qui éteint les
+        réverbérations sans fin (U = 0 : modèle de Shiu d'origine).</p>
+      <h4 class="sub-h">Stimuli sensoriels</h4>
+      <div class="ev-btns" id="ev-sens"><span class="hint">démarre la simulation</span></div>
+      <h4 class="sub-h">Activation directe (optogénétique)</h4>
+      <div class="ev-btns" id="ev-opto"></div>
+      <label class="check"><input type="checkbox" id="live-audio"> Le son (section Son) stimule l'organe de Johnston</label>
+      <h4 class="sub-h">Lecture motrice</h4>
+      <div id="chan-bars" class="chan-bars"></div>
+      <div id="leg-grid" class="leg-grid" aria-label="Motoneurones des pattes"></div>
+      <p class="note">Pattes : activation des motoneurones par muscle (case vide : aucun motoneurone de ce type).
+        Du connectome : les taux des neurones descendants et des motoneurones. Choisi à la main : leur
+        traduction en angles, la marche en trépied et la trajectoire du saut.</p>
+    </section>
+
+    <section>
+      <div class="sec-head"><h2>Son</h2><span class="hint" id="src-label">aucune source</span></div>
+      <div class="src-btns">
+        <button id="src-demo">▶ Beat de démo</button>
+        <label class="filebtn" id="src-file-btn">♫ Fichier…<input type="file" id="src-file" accept="audio/*" hidden></label>
+        <button id="src-mic">🎤 Micro</button>
+        <button id="src-stop" class="ghost">■ Stop</button>
+      </div>
+      <audio id="player" controls hidden></audio>
+      <label class="check"><input type="checkbox" id="demo-breaks" checked> Démo : une mesure de silence sur 8</label>
+      <label class="field"><span class="lab">Volume <b class="val" id="vol-val"></b></span>
+        <input type="range" id="volume" min="0" max="1" step="0.01" value="0.8"></label>
+    </section>
+
+    <section>
+      <div class="sec-head"><h2>Écoute</h2><span class="hint" id="bpm">– BPM</span></div>
+      <div class="meter" aria-hidden="true"><div class="meter-fill" id="meter-fill"></div><div class="meter-thr" id="meter-thr"></div></div>
+      <div class="meter-labels"><span>−80 dB</span><span id="db-val">–</span><span>0 dB</span></div>
+      <canvas id="sig" class="sig" aria-label="Niveau sonore des 6 dernières secondes"></canvas>
+      <p class="muted small-note">Niveau sur 6 s · ligne horizontale = seuil · traits = attaques (hauts = grosse caisse)</p>
+      <label class="field"><span class="lab">Seuil de silence <b class="val" id="thr-val"></b></span>
+        <input type="range" id="thr" min="-80" max="-10" step="1" value="-50"></label>
+      <label class="field"><span class="lab">Arrêt après <b class="val" id="hold-val"></b></span>
+        <input type="range" id="hold" min="0.1" max="2" step="0.05" value="0.35"></label>
+    </section>
+
+    <section id="dance-sec">
+      <div class="sec-head"><h2>Danse</h2></div>
+      <label class="check"><input type="checkbox" id="dance-on" checked> Twerk quand il y a du son</label>
+      <label class="field"><span class="lab">Intensité <b class="val" id="int-val"></b></span>
+        <input type="range" id="intensity" min="0" max="1.5" step="0.05" value="1"></label>
+      <label class="field">Cadence
+        <select id="cadence">
+          <option value="auto">Auto (selon le tempo)</option>
+          <option value="1">1 coup par temps</option>
+          <option value="2">2 coups par temps</option>
+        </select></label>
+      <label class="check"><input type="checkbox" id="song" checked> Chant de cour : une aile vibre sur le 1er temps</label>
+    </section>
+
+    <section>
+      <div class="sec-head"><h2>Corps</h2><button class="ghost small" id="reset-pose">Réinitialiser</button></div>
+      <div id="joints" class="joints"></div>
+      <p class="note">Les pattes suivent en cinématique inverse : les tarses restent posés au sol.
+        La danse s'ajoute à cette pose. Console : <code>fly.pose</code>, <code>fly.set("abdPitch", 0.4)</code>.</p>
+    </section>
+  </aside>
+</div>
+
+<script type="module" src="/static/fly/main.js"></script>
+</body>
+</html>
