@@ -30,7 +30,7 @@ The interface is in French.
 ## Quick start
 
 ```sh
-git clone <this repository> flybrain
+git clone https://github.com/jppaquet/flybrain.git
 cd flybrain
 ./setup.sh      # downloads the data, creates .venv, converts the connectome
 ./run.sh        # starts the local server
@@ -128,3 +128,11 @@ grid. Tick *Le son stimule l'organe de Johnston* to feed the audio source to the
 - Neuron model: Shiu, P. K. et al. *A Drosophila computational brain model reveals
   sensorimotor processing.* Nature (2024).
 - 3D rendering: [three.js](https://threejs.org) (MIT licence), vendored in `static/vendor/three`.
+
+## Licence
+
+The code in this repository is released under the [MIT licence](LICENSE).
+three.js keeps its own MIT licence (`static/vendor/three/LICENSE`). The MaleCNS
+connectome data is not part of this repository: `setup.sh` downloads it from FlyEM, and
+it remains under its CC-BY licence — cite the MaleCNS paper and Shiu et al. (2024) if you
+publish results obtained with it.

@@ -1,0 +1,7 @@
+# Fins de ligne LF dans le dépôt ; les scripts shell doivent rester en LF même sur Windows/WSL
+* text=auto eol=lf
+*.sh text eol=lf
+
+# three.js vendorisé : exclu des statistiques de langage GitHub, pas de diff des fichiers minifiés
+static/vendor/** linguist-vendored
+*.min.js -diff

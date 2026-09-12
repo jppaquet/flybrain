@@ -7,11 +7,33 @@ last_run.npz
 
 # Environnement Python
 .venv/
+venv/
+env/
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets et configuration locale
+.env
+.env.*
+*.local.json
 
 # Réglages locaux de Claude Code
 .claude/settings.local.json
 
+# Éditeurs
+.vscode/
+.idea/
+*.swp
+*~
+
+# Journaux
+*.log
+
 # Système
 .DS_Store
+._*
+Thumbs.db
