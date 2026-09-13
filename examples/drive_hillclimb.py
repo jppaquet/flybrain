@@ -9,7 +9,11 @@ each front leg (steering wheel) and each hind leg (pedals). Only the leg motor n
 move the kart. No dependency beyond numpy; an episode runs about as fast as real time.
 
     .venv/bin/python examples/drive_hillclimb.py --iters 20 --steps 200
-    .venv/bin/python examples/live_policy.py drive_policy.json     # then watch it on /fly
+    .venv/bin/python examples/drive_hillclimb.py --watch            # and watch every episode on /fly
+    .venv/bin/python examples/live_policy.py drive_policy.json     # drive the page's kart afterwards
+
+With --watch (the server must run: ./run.sh), every episode is streamed to the server and
+the 3D page (/fly) follows it by itself: the fly on its kart, its 3D brain, the log.
 """
 import argparse, json, os, sys, time
 import numpy as np
@@ -38,9 +42,11 @@ def main():
     ap.add_argument("--sigma", type=float, default=1.0, help="size of the random perturbations")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="drive_policy.json")
+    ap.add_argument("--watch", nargs="?", const="http://127.0.0.1:8765", default=None, metavar="URL",
+                    help="stream the episodes to the server so that /fly shows them (default URL %(const)s)")
     a = ap.parse_args()
 
-    env = flyenv.DriveEnv(max_steps=a.steps)
+    env = flyenv.DriveEnv(max_steps=a.steps, viewer=a.watch)
     print("inputs:", *env.action_names, sep="\n  ")
     rng = np.random.default_rng(a.seed)
     W = np.zeros((len(env.action_names), len(env.observation_names) + 1))

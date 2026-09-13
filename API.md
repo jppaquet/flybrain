@@ -100,6 +100,28 @@ quarter of each beat and − elsewhere. Default inputs: the Drive and Keyboard k
 | `neckL/R`, `antL/R`, `abdL/R` | neck, antenna and abdomen motor neurons |
 | `T1L_pro` … `T3R_tal` | leg motor neurons: leg T1/T2/T3, side L/R, muscle group `pro` `rem` (coxa promotors / remotors), `trx` `trf` (trochanter extensors / flexors), `tix` `tif` (tibia extensors / flexors), `tad` `tal` (tarsus depressors / levators) |
 
+### Watching a training run in 3D
+
+Pass `viewer=True` (or a server URL) to `DriveEnv`, `DanceEnv` or `FlyBrain`, with the
+server running (`./run.sh`):
+
+```python
+env = flyenv.DriveEnv(viewer=True)          # viewer="http://host:8765" for another server
+env.brain.viewer.note("new best policy")    # a line in the page's event log
+flyenv.Viewer(realtime=True)                # slows the simulation to real time, to watch calmly
+```
+
+Every simulated 10 ms frame is streamed to the server (`/api/view/start`, `/api/view/push`)
+from a background thread — it never slows training, and frames are dropped if the server is
+unreachable. The server makes it the current session, and the 3D page (`/fly`) follows the
+current session by itself: it switches to the kart when there is one, shows the fly, its
+3D brain (the driven groups in amber), the gauges and the episode notes, and turns its
+keys off since the inputs belong to your process. *Start simulation* on the page takes the
+server back; streaming then stops until `viewer.reconnect()`.
+
+The page follows any session the same way — also one that a script starts or drives over
+HTTP.
+
 ### Running a trained policy on the live page
 
 `examples/drive_hillclimb.py` trains a linear policy offline and saves it as JSON;
@@ -116,7 +138,10 @@ its frames for 20 s.
 | Method and path | Body | Effect / answer |
 |---|---|---|
 | `POST /api/live/start` | `{params: {dt, w_scale, std_u, std_tau, quench_ms, world}}` | starts a session; answers `id`, `channels`, `events`, `keysets`, `reach`, `controls`, `track`, `kart_keys`, `audio_idx` |
-| `GET /api/live/session` | | `{id, alive, world}` of the running session (to join the page's) |
+| `GET /api/live/session` | | `{id, alive, kind, label, world}` of the current session (`kind`: `sim` or `remote`) |
+| `GET /api/live/info?id=` | | the start information of the current session, with `groups` (inputs named by scripts) |
+| `POST /api/view/start` | `{label, world}` | another process will stream frames: a `remote` session becomes current; answers its `id` |
+| `POST /api/view/push` | `{id, frames, groups}` | frames in the format below, and new input groups `{name: [indices]}` |
 | `GET /api/live/frames?id=&since=` | | frames since index `since` (up to 300), and `next` |
 | `POST /api/live/stim` | `{id, name, query, field, side, hz, ms}` | drives any group (`ms` omitted: until `hz` 0); answers `{name, n}` |
 | `POST /api/live/event` | `{id, key}` | a stimulus button (`loomL`, `loomR`, `loom`, `sugar`, `sound`, `wind`, `cva`, `gf`, `pip10`) |

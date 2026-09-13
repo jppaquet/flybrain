@@ -59,6 +59,7 @@ brain.onNote = txt => body.note(txt);
 let mode = "brain", lastAudio = 0, lastKick = -10, stimNames = "", liftLeft = 0, liftApplied = 0;
 let keysHeld = new Set(), lastDrive = 0, dragging = false;
 let presses = { L: null, R: null }, reachInfo = {}, queue = [];   // switchboard: press in progress per front leg, keys waiting
+let dismissed = null, starting = false, infoAsked = 0, keysOffNote = 0;   // following the server's session
 const lastRoot = new THREE.Vector3();
 function followCamera() {
   const p = fly.root.position, d = p.clone().sub(lastRoot);
@@ -217,6 +218,10 @@ function frame(ts) {
       for (const s of brain.spikes) brain3d.spike(s);
       const names = brain.cur ? brain.cur[4] : [], k = names.join(",");
       if (k !== stimNames) { stimNames = k; brain3d.setStim(brain.inputIdx(names)); }
+      // inputs named by a script or flyenv: fetch their neurons once, to tint them too
+      if (names.some(n => !/^(ev|key|reach|audio)/.test(n) && !brain.info?.groups?.[n]) && now - infoAsked > 2) {
+        infoAsked = now; brain.refreshInfo().then(() => { stimNames = ""; });
+      }
       brain3d.update(dt, fly.root.position, fly.root.rotation.y, renderer.domElement.height);
     }
     brain.spikes.length = 0;
@@ -296,7 +301,8 @@ const MODE_NOTE = {
   board: "The number keys make the tethered fly press switches with its front legs, moved by its own nerve cord.",
   car: "The fly drives a kart: its leg motor neurons turn the wheel and press the pedals.",
 };
-function setMode(m) {
+/* follow: the page is following a session it did not start - never reset or start one */
+function setMode(m, follow = false) {
   releaseKeys();
   const prev = mode;
   mode = m;
@@ -314,10 +320,10 @@ function setMode(m) {
   kart3d.setVisible(m === "car");
   if (m !== "board") { presses = { L: null, R: null }; queue = []; }
   if (m === "board") { body.reset(); fly.root.position.set(0, 0, 0); followCamera(); boardView(); }
-  if (m === "car") { body.reset(); if (brain.id != null) brain.world("kart", true); }
+  if (m === "car") { body.reset(); if (brain.id != null && !follow) brain.world("kart", true); }
   if (m !== "brain") {
     document.activeElement?.blur();                            // Space and digits must not click a focused button
-    if (brain.id == null) startLive();
+    if (brain.id == null && !follow) startLive();
   }
   showBrain($("#live-brain").checked);
   lastChip = "";
@@ -349,6 +355,11 @@ function jump() {
 }
 addEventListener("keydown", e => {
   if (e.metaKey || e.ctrlKey || e.altKey || typing(e)) return;
+  if (brain.remote && mode !== "brain" && (KEYMAP[e.code] || /^(Digit|Numpad)\d$|^Space$|^KeyR$/.test(e.code))) {
+    e.preventDefault();                                        // a streamed session takes no input from here
+    if (performance.now() - keysOffNote > 3000) { keysOffNote = performance.now(); body.note(`Keys are off: ${brain.info.remote} drives this fly`); }
+    return;
+  }
   if (mode === "board" && /^(Digit|Numpad)\d$/.test(e.code)) {
     e.preventDefault();
     const d = +e.code.slice(-1);
@@ -555,6 +566,8 @@ function brainChip() {
   const st = brain.status;
   if (!st) return ["listening", `${who} · starting…`];
   const n = brain.cur ? brain.cur[3] : 0;
+  if (brain.remote) return [st.alive ? "dancing" : "", st.alive ? `Watching ${brain.info.remote} · ${n.toLocaleString("en-US")} active neurons`
+                                                                : `${brain.info.remote} stopped streaming`];
   return [n > 0 ? "dancing" : "listening", `${who} · ${st.speed.toFixed(2)}× real time · ${n.toLocaleString("en-US")} active neurons`];
 }
 
@@ -562,6 +575,7 @@ const liveParams = () => ({ model: "shiu", dt: +$("#live-dt").value, w_scale: +$
                             std_u: +$("#live-u").value, std_tau: +$("#live-tau").value,
                             quench_ms: $("#live-quench").checked ? 1000 : 0, world: mode === "car" ? "kart" : null });
 async function startLive(note) {
+  starting = true; dismissed = null;
   try {
     status("Starting the simulation…");
     const info = await brain.start(liveParams());
@@ -571,17 +585,46 @@ async function startLive(note) {
     status(`Continuous simulation · ${info.channels.length} motor channels read`);
     if (note) body.note(note);
   } catch (e) { status(`Simulation failed: ${e.message}`, true); }
+  finally { starting = false; checkSession(); }
 }
 $("#live-start").addEventListener("click", () => {
-  if (brain.id != null) { releaseKeys(); brain.stop(); $("#live-start").textContent = "Start simulation"; return; }
+  if (brain.id != null) {                                     // a watched session is only left, not stopped
+    releaseKeys(); if (brain.remote) dismissed = brain.id;
+    brain.stop(); $("#live-start").textContent = "Start simulation"; checkSession(); return;
+  }
   startLive();
 });
+
+/* --------------------------------------------------------- follow the server */
+/* The page renders whatever the server runs: its own session, one that a script started
+   over HTTP, or a training run that flyenv streams (Viewer). It checks every 2 s. */
+async function follow(s) {
+  const info = await brain.attach(s.id);
+  buildBrainUI(info);
+  brain3d.clear(); stimNames = "";
+  $("#live-start").textContent = "Stop";
+  setMode(info.world === "kart" ? "car" : mode === "car" ? "brain" : mode, true);
+  body.note(info.remote ? `Watching ${info.remote}` : `Following session ${info.id}, started elsewhere`);
+  status(info.remote ? `Watching ${info.remote}, simulated in another process` : `Following the server's session ${info.id}`);
+}
+async function checkSession() {
+  if (!starting) {
+    try {
+      const s = await (await fetch("/api/live/session")).json();
+      if (s.alive && s.id !== brain.id && s.id !== dismissed) await follow(s);
+    } catch { /* server restarting: try again later */ }
+  }
+  $("#watch").hidden = !brain.remote;
+  $("#watch-label").textContent = brain.remote ? `“${brain.info.remote}”` : "";
+}
+setInterval(checkSession, 2000);
 $("#live-zero").addEventListener("click", () => startLive("Network reset to rest"));
 $("#live-reset").addEventListener("click", () => { body.reset(); });
 
 setMode("brain");
 requestAnimationFrame(frame);
 status("Ready · start the simulation");
+checkSession();                                              // a training run may already be streaming
 
 window.fly = {
   get pose() { return { ...base }; },

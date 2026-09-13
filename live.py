@@ -137,6 +137,7 @@ class Session:
         self.sim = engine.Stepper(C, self.q)
         self.chans = channels(C)
         self.keys = [c["key"] for c in self.chans]
+        self.kind, self.label, self.groups = "sim", None, {}     # groups: inputs named by scripts
         self.driver = world.Driver() if params.get("world") == "kart" else None
         self.frames, self.base = [], 0
         self.inputs = {}                    # name -> dict(idx, hz, until)
@@ -236,11 +237,59 @@ class Session:
     def stop(self):
         self.stop_ev.set()
 
+    @property
+    def alive(self):
+        return self.thread.is_alive() and not self.stop_ev.is_set()
+
+    @property
+    def world_name(self):
+        return "kart" if self.driver is not None else None
+
+
+class Remote:
+    """A session simulated in another process (flyenv with a Viewer), which streams its
+    frames here in the same format: the page renders them exactly like its own simulation.
+    Nothing is simulated in the server, and it takes no input (they belong to the process)."""
+    kind = "remote"
+
+    def __init__(self, label, world_name=None):
+        self.label, self.world_name, self.groups = label, world_name, {}
+        self.frames, self.base, self.t_ms = [], 0, 0.0
+        self.lock, self.last_push, self.stopped = threading.Lock(), time.time(), False
+
+    @property
+    def alive(self):
+        return not self.stopped and time.time() - self.last_push < 15
+
+    def push(self, frames, groups):
+        with self.lock:
+            self.groups.update(groups)
+            self.frames.extend(f for f in frames if isinstance(f, list) and len(f) >= 8)
+            if self.frames: self.t_ms = self.frames[-1][0]
+            if len(self.frames) > 6000:
+                self.frames = self.frames[3000:]; self.base += 3000
+            self.last_push = time.time()
+
+    def read(self, since, limit=300):
+        with self.lock:
+            i = min(max(0, since - self.base), len(self.frames))
+            out = self.frames[i:i + limit]
+            return dict(frames=out, next=self.base + i + len(out), speed=1.0, t_ms=round(self.t_ms, 1),
+                        inputs=out[-1][4] if out else [], error=None, alive=self.alive)
+
+    def stimulate(self, *args, **kwargs):
+        raise KeyError(f"this session is simulated by {self.label}: drive it from there")
+
+    set_world = stimulate
+
+    def stop(self):
+        self.stopped = True
+
 
 class Live:
     """One session at a time (local server, single user)."""
     def __init__(self, C):
-        self.C, self.session, self.sid = C, None, 0
+        self.C, self.session, self.sid, self.info = C, None, 0, None
         self._ev, self._jo, self._reach, self._keys, self._api = None, None, None, {}, {}
 
     def event_idx(self):
@@ -263,31 +312,56 @@ class Live:
         if self._jo is None: self._jo = select(self.C, AUDIO_INPUT["query"], AUDIO_INPUT["field"])
         return self._jo
 
-    def start(self, params):
-        if self.session: self.session.stop()
-        self.sid += 1
-        self.session = Session(self.C, params)
+    def _info(self, **extra):
+        """What a page needs to render a session: channels, inputs, key sets, track…"""
         ev, rc = self.event_idx(), self.reach_idx()
-        return dict(id=self.sid, frame_ms=FRAME_MS, brain_ms=FRAME_MS * BRAIN_EVERY, params=self.session.q,
+        return dict(id=self.sid, frame_ms=FRAME_MS, brain_ms=FRAME_MS * BRAIN_EVERY,
                     channels=[dict(key=c["key"], label=c["label"], group=c["group"], n=int(len(c["idx"])))
-                              for c in self.session.chans],
+                              for c in channels(self.C)],
                     events=[dict(e, n=int(len(ev[e["key"]])), idx=ev[e["key"]].tolist()) for e in EVENTS],
                     keysets={name: [dict(d, n=int(len(self.keyset_idx(name)[d["key"]])),
                                          idx=self.keyset_idx(name)[d["key"]].tolist()) for d in ks]
                              for name, ks in KEYSETS.items()},
                     controls=world.CONTROLS, track=world.Track().to_dict(), kart_keys=world.Kart.FRAME_KEYS,
                     reach=[dict(r, n=int(len(rc[r["side"]])), idx=rc[r["side"]].tolist()) for r in REACH],
-                    audio_idx=self.audio_idx().tolist())
+                    audio_idx=self.audio_idx().tolist(), **extra)
+
+    def start(self, params):
+        if self.session: self.session.stop()
+        self.sid += 1
+        self.session = Session(self.C, params)
+        self.info = self._info(params=self.session.q, remote=None, world=self.session.world_name)
+        return self.info
+
+    def remote_start(self, label, world_name=None):
+        """Another process (flyenv's Viewer) streams its own simulation: it becomes the
+        current session, which the page follows."""
+        if self.session: self.session.stop()
+        self.sid += 1
+        self.session = Remote(label, world_name)
+        self.info = self._info(params=None, remote=label, world=world_name)
+        return self.info
+
+    def push(self, sid, frames, groups):
+        s = self.get(sid)
+        if not isinstance(s, Remote): raise KeyError("this session is not a streamed one")
+        s.push(frames, groups)
+        return dict(ok=True, n=len(frames))
 
     def get(self, sid):
         if self.session is None or int(sid) != self.sid: raise KeyError("unknown or replaced session")
         return self.session
 
+    def info_of(self, sid):
+        """The start information of the current session, to follow it from a page."""
+        s = self.get(sid)
+        return dict(self.info, id=self.sid, groups=s.groups, world=s.world_name, remote=s.label)
+
     def current(self):
-        """The running session, so that a script can join the one the page started."""
+        """The running session, so that a page or a script can follow or join it."""
         s = self.session
-        return dict(id=self.sid if s else None, alive=bool(s and s.thread.is_alive() and not s.stop_ev.is_set()),
-                    world="kart" if s and s.driver is not None else None, frame_ms=FRAME_MS)
+        return dict(id=self.sid if s else None, alive=bool(s and s.alive), kind=s.kind if s else None,
+                    label=s.label if s else None, world=s.world_name if s else None, frame_ms=FRAME_MS)
 
     def event(self, sid, key):
         e = next(e for e in EVENTS if e["key"] == key)
@@ -321,6 +395,7 @@ class Live:
         if k not in self._api: self._api[k] = select(self.C, query, field, side)
         idx = self._api[k]
         s.stimulate(f"api:{name}", idx, float(hz), None if ms is None else float(ms))
+        s.groups[f"api:{name}"] = idx.tolist()                 # lets the page tint them in the 3D brain
         return dict(name=name, n=int(len(idx)))
 
     def reach(self, sid, side):

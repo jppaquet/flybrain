@@ -22,7 +22,7 @@ Lower level, any experiment:
     rates = brain.step({lal: 150}, ms=100)         # {channel key: Hz} over those 100 ms
     rates["turnL"]                                 # DNa01/02 left, driven through synapses
 """
-import math
+import base64, json, math, queue, threading, time, urllib.error, urllib.request
 import numpy as np
 import engine, live, world
 
@@ -46,19 +46,121 @@ class Group:
         return f"Group({self.name!r}, {len(self.idx)} neurons)"
 
 
+class Viewer:
+    """Streams a flyenv simulation to the running server (./run.sh), so that the 3D page
+    (/fly) renders it live - the fly, its 3D brain and, with DriveEnv, the kart - while
+    your code trains. The page follows the server's current session by itself.
+
+        env = flyenv.DriveEnv(viewer=True)                 # or viewer="http://host:8765"
+        env.brain.viewer.note("best policy so far")        # shown in the page's log
+
+    Frames leave in batches from a background thread and never slow the simulation down;
+    they are dropped if the server is unreachable. If someone takes the server back (Start
+    simulation on the page, or another script), streaming stops until reconnect().
+    realtime=True slows the simulation down to real time, to watch a policy calmly."""
+    BRAIN_EVERY, BRAIN_CAP = live.BRAIN_EVERY, live.BRAIN_CAP
+
+    def __init__(self, url="http://127.0.0.1:8765", label="flyenv", world=None, realtime=False):
+        self.url, self.label, self.world, self.realtime = url.rstrip("/"), label, world, realtime
+        self.id, self.t_ms, self.acc, self.notes, self.wall0 = None, 0.0, [], [], None
+        self.groups, self.pending = {}, {}             # input groups (name -> indices), and those to send
+        self.q, self.active, self.warned = queue.Queue(maxsize=3000), True, False
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def note(self, text):
+        """A message shown in the page's event log (one per frame, in order)."""
+        self.notes.append(text)
+
+    def reconnect(self):
+        """Resume streaming in a new session after the server was taken over."""
+        self.id, self.active = None, True
+
+    def frame(self, rates, spikes, inputs, kart=None, groups=None):
+        """One 10 ms frame: channel rates (list, live.channels order, driven neurons masked),
+        neurons that fired, names of the active inputs, kart frame or None."""
+        if not self.active: return
+        self.t_ms += live.FRAME_MS                     # the page's own clock: never goes back
+        for name, idx in (groups or {}).items():
+            if name not in self.groups:
+                self.groups[name] = self.pending[name] = [int(i) for i in idx]
+        self.acc.append(spikes)
+        b64 = None
+        if len(self.acc) >= self.BRAIN_EVERY:
+            u = np.unique(np.concatenate(self.acc)); self.acc = []
+            if len(u) > self.BRAIN_CAP: u = np.sort(np.random.default_rng(0).choice(u, self.BRAIN_CAP, replace=False))
+            b64 = base64.b64encode(u.astype("<i4").tobytes()).decode()
+        f = [round(self.t_ms, 1), rates, int(len(spikes)), int(len(spikes)), list(inputs),
+             self.notes.pop(0) if self.notes else None, b64, kart]
+        try: self.q.put_nowait(f)
+        except queue.Full: pass                        # the server is too slow: drop, never block
+        if self.realtime:
+            now = time.time()
+            if self.wall0 is None: self.wall0 = now - self.t_ms / 1000
+            ahead = self.t_ms / 1000 - (now - self.wall0)
+            if ahead > 0: time.sleep(ahead)
+            elif ahead < -0.5: self.wall0 = now - self.t_ms / 1000
+
+    def _post(self, path, body):
+        req = urllib.request.Request(self.url + path, json.dumps(body).encode(), method="POST",
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read())
+
+    def _run(self):
+        last = None
+        while True:
+            try:
+                batch = [self.q.get(timeout=0.5)]
+            except queue.Empty:                        # idle (e.g. an episode just ended): pending notes
+                if not (self.notes and last and self.active): continue
+                self.t_ms += live.FRAME_MS             # ride on a copy of the last frame
+                batch = [[round(self.t_ms, 1)] + last[1:5] + [self.notes.pop(0), None] + last[7:]]
+            time.sleep(0.1)                            # ~10 requests per second at most
+            while True:
+                try: batch.append(self.q.get_nowait())
+                except queue.Empty: break
+            last = batch[-1]
+            if not self.active: continue
+            try:
+                if self.id is None:
+                    self.id = self._post("/api/view/start", dict(label=self.label, world=self.world))["id"]
+                    self.pending = dict(self.groups)
+                groups, self.pending = self.pending, {}
+                self._post("/api/view/push", dict(id=self.id, frames=batch, groups=groups))
+            except urllib.error.HTTPError as e:
+                if e.code == 409:
+                    self.active = False
+                    print("flyenv viewer: the server's session was taken over; streaming stopped "
+                          "(viewer.reconnect() resumes)", flush=True)
+            except Exception as e:
+                if not self.warned:
+                    print(f"flyenv viewer: {self.url} unreachable ({e}); frames are dropped", flush=True)
+                    self.warned = True
+                time.sleep(2)
+
+
+def _viewer(v, label, world_name):
+    """viewer argument of the environments: None/False, True, a URL, or a Viewer."""
+    if not v: return None
+    if isinstance(v, Viewer): return v
+    return Viewer(url=v if isinstance(v, str) else "http://127.0.0.1:8765", label=label, world=world_name)
+
+
 class FlyBrain:
     """Leaky integrate-and-fire simulation of the whole CNS, advanced in 10 ms frames.
 
     Channels are the live page's readouts (live.channels): descending neurons for
     locomotion, motor neurons of every leg muscle group, wings, neck, antennae, abdomen,
-    proboscis. `channel_keys` lists them."""
+    proboscis. `channel_keys` lists them. viewer=True streams every frame to the 3D page."""
     FRAME_MS = live.FRAME_MS
 
-    def __init__(self, params=None, seed=0):
+    def __init__(self, params=None, seed=0, viewer=None):
         self.C = connectome()
         self.q = engine.resolve_params(dict(LIVE_PARAMS, **(params or {})))
         self.chans = live.channels(self.C)
         self.channel_keys = [c["key"] for c in self.chans]
+        self.viewer = _viewer(viewer, "FlyBrain", None)
+        self.world_frame = None                        # callable -> kart frame, set by DriveEnv
         self.reset(seed)
 
     def reset(self, seed=0):
@@ -79,17 +181,31 @@ class FlyBrain:
         .n_active."""
         frames = max(1, int(round((ms or self.FRAME_MS) / self.FRAME_MS)))
         n = max(1, int(round(self.FRAME_MS / self.q["dt"])))
-        pairs = [(g.idx if isinstance(g, Group) else np.asarray(g, np.int32), float(hz))
-                 for g, hz in (drive or {}).items() if hz > 0]
+        active = [(g, hz) for g, hz in (drive or {}).items() if hz > 0]
+        pairs = [(g.idx if isinstance(g, Group) else np.asarray(g, np.int32), float(hz)) for g, hz in active]
         tot = np.zeros(self.C.N, np.int64)
         for _ in range(frames):
-            tot += np.bincount(self.sim.step(n, pairs), minlength=self.C.N)
-        self.t_ms += frames * self.FRAME_MS
+            c = np.bincount(self.sim.step(n, pairs), minlength=self.C.N)
+            tot += c
+            self.t_ms += self.FRAME_MS
+            if self.viewer is not None: self._emit(c, pairs, active)
         self.spikes = np.flatnonzero(tot).astype(np.int32)
         self.n_active = int(len(self.spikes))
         for idx, _ in pairs: tot[idx] = 0                   # always through synapses
         sec = frames * self.FRAME_MS / 1000.0
         return {c["key"]: float(tot[c["idx"]].sum()) / len(c["idx"]) / sec for c in self.chans}
+
+    def _emit(self, c, pairs, active):
+        """One frame to the viewer, in the live page's format."""
+        spikes = np.flatnonzero(c).astype(np.int32)
+        if pairs:
+            c = c.copy()
+            for idx, _ in pairs: c[idx] = 0
+        k = 1000.0 / self.FRAME_MS
+        rates = [round(float(c[ch["idx"]].sum()) * k / len(ch["idx"]), 1) for ch in self.chans]
+        names = [g.name if isinstance(g, Group) else "input" for g, _ in active]
+        self.viewer.frame(rates, spikes, names, self.world_frame() if self.world_frame else None,
+                          {g.name: g.idx for g, _ in active if isinstance(g, Group)})
 
 
 def drive_observation(s, track=None):
@@ -121,19 +237,23 @@ class DriveEnv:
 
     observation_names = ["speed", "wheel", "offset", "heading_error", "throttle", "brake", "push"]
 
-    def __init__(self, inputs=None, step_ms=50, max_steps=1200, max_hz=250.0, params=None, track=None, seed=0):
-        self.brain = FlyBrain(params, seed)
+    def __init__(self, inputs=None, step_ms=50, max_steps=1200, max_hz=250.0, params=None, track=None, seed=0,
+                 viewer=None):
+        self.brain = FlyBrain(params, seed, viewer=_viewer(viewer, "DriveEnv", "kart"))
         self.inputs = _inputs(self.brain, inputs or live.KEYSETS["car"])
         self.action_names = [g.name for g in self.inputs]
         self.action_high = np.full(len(self.inputs), float(max_hz), np.float32)
         self.step_ms, self.max_steps = int(step_ms), int(max_steps)
         self.driver = world.Driver(track)
-        self.steps = 0
+        self.brain.world_frame = self.driver.kart.frame    # the page draws the kart from the frames
+        self.steps, self.episode, self.ret = 0, 0, 0.0
 
     def reset(self, seed=None):
         self.brain.reset(0 if seed is None else int(seed))
         self.driver.reset()
-        self.steps = 0
+        self.steps, self.ret = 0, 0.0
+        self.episode += 1
+        if self.brain.viewer: self.brain.viewer.note(f"DriveEnv episode {self.episode}")
         return self._obs(), dict(distance=0.0, t_ms=0.0)
 
     def step(self, action):
@@ -149,6 +269,10 @@ class DriveEnv:
         terminated = off > k.track.W
         reward = gained - 0.02 * off / k.track.W - (5.0 if terminated else 0.0)
         truncated = self.steps >= self.max_steps
+        self.ret += reward
+        if (terminated or truncated) and self.brain.viewer:
+            self.brain.viewer.note(f"episode {self.episode}: {'off the road' if terminated else 'end'} after "
+                                   f"{k.dist:.1f} along the road, return {self.ret:.2f}")
         info = dict(distance=k.dist, t_ms=self.brain.t_ms, n_active=self.brain.n_active,
                     kart=k.state(), motor=dict(self.driver.S))           # smoothed rates the kart reads
         return self._obs(), float(reward), bool(terminated), bool(truncated), info
@@ -173,8 +297,8 @@ class DanceEnv:
     DEFAULT_MOTOR = ["T1L_pro", "T1R_pro", "T3R_trx", "T3L_tif", "abdL", "abdR"]
 
     def __init__(self, inputs=None, motor=None, bpm=120.0, step_ms=20, max_steps=500, max_hz=250.0,
-                 hear=True, params=None, seed=0):
-        self.brain = FlyBrain(params, seed)
+                 hear=True, params=None, seed=0, viewer=None):
+        self.brain = FlyBrain(params, seed, viewer=_viewer(viewer, "DanceEnv", None))
         self.inputs = _inputs(self.brain, inputs or (live.KEYSETS["car"] + live.KEYSETS["walk"]))
         self.action_names = [g.name for g in self.inputs]
         self.action_high = np.full(len(self.inputs), float(max_hz), np.float32)

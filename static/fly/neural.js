@@ -17,7 +17,23 @@ export class BrainLink {
   reset() {
     this.id = null; this.info = null; this.frames = []; this.next = 0; this.tPlay = null;
     this.S = {}; this.raw = {}; this.cur = null; this.status = null; this.error = null; this.spikes = [];
-    this.peak = {}; this.kart = null;
+    this.peak = {}; this.kart = null; this.remote = false; this.lost = false;
+  }
+  /* Follows a session the page did not start: a script over HTTP, or flyenv streaming a
+     training run (info.remote is then its label). */
+  async attach(id) {
+    const r = await fetch(`/api/live/info?id=${id}`);
+    const info = await r.json();
+    if (!r.ok) throw new Error(info.error || "cannot follow the session");
+    this.reset(); this.info = info; this.id = info.id; this.remote = !!info.remote;
+    this.keys = info.channels.map(c => c.key);
+    this.poll(info.id);
+    return info;
+  }
+  async refreshInfo() {
+    if (this.id == null) return;
+    const r = await fetch(`/api/live/info?id=${this.id}`);
+    if (r.ok) this.info = await r.json();
   }
   async start(params) {
     this.stop();
@@ -34,6 +50,7 @@ export class BrainLink {
       try {
         const r = await fetch(`/api/live/frames?id=${id}&since=${this.next}`);
         const d = await r.json();
+        if (r.status === 409) { this.lost = true; break; }         // replaced: the page follows the new one
         if (!r.ok) { this.error = d.error; break; }
         if (this.id !== id) break;
         this.frames.push(...d.frames); this.next = d.next; this.status = d;
@@ -43,26 +60,29 @@ export class BrainLink {
     }
   }
   stop() {
-    if (this.id != null) fetch("/api/live/stop", { method: "POST", body: JSON.stringify({ id: this.id }) });
-    this.id = null;
+    if (this.id != null && !this.remote) fetch("/api/live/stop", { method: "POST", body: JSON.stringify({ id: this.id }) });
+    this.id = null; this.remote = false;
   }
-  event(key) { if (this.id != null) fetch("/api/live/event", { method: "POST", body: JSON.stringify({ id: this.id, key }) }); }
-  audio(level, hit = false) { if (this.id != null) fetch("/api/live/audio", { method: "POST", body: JSON.stringify({ id: this.id, level, hit }) }); }
-  drive(keys, keyset = "walk") { if (this.id != null) fetch("/api/live/drive", { method: "POST", body: JSON.stringify({ id: this.id, keys, keyset }) }); }
+  /* A followed remote session takes no input from the page: its inputs live in its process. */
+  get own() { return this.id != null && !this.remote; }
+  event(key) { if (this.own) fetch("/api/live/event", { method: "POST", body: JSON.stringify({ id: this.id, key }) }); }
+  audio(level, hit = false) { if (this.own) fetch("/api/live/audio", { method: "POST", body: JSON.stringify({ id: this.id, level, hit }) }); }
+  drive(keys, keyset = "walk") { if (this.own) fetch("/api/live/drive", { method: "POST", body: JSON.stringify({ id: this.id, keys, keyset }) }); }
   async world(name, reset = false) {
     if (name == null) this.kart = null;
-    if (this.id == null) return null;
+    if (!this.own) return null;
     const r = await fetch("/api/live/world", { method: "POST", body: JSON.stringify({ id: this.id, world: name, reset }) });
     return r.json();
   }
-  reach(side) { if (this.id != null) fetch("/api/live/reach", { method: "POST", body: JSON.stringify({ id: this.id, side }) }); }
+  reach(side) { if (this.own) fetch("/api/live/reach", { method: "POST", body: JSON.stringify({ id: this.id, side }) }); }
 
   /* Neurons driven by the current inputs (frame names -> indices from the start info). */
   inputIdx(names) {
     return names.map(n => n.startsWith("ev:") ? this.info.events.find(e => e.key === n.slice(3))?.idx
                          : n.startsWith("key:") ? this.info.keysets[n.split(":")[1]]?.find(d => d.key === n.split(":")[2])?.idx
                          : n.startsWith("reach:") ? this.info.reach.find(r => r.side === n.slice(6))?.idx
-                         : n.startsWith("audio") ? this.info.audio_idx : null).filter(Boolean);
+                         : n.startsWith("audio") ? this.info.audio_idx
+                         : this.info.groups?.[n] || null).filter(Boolean);   // groups named by scripts and flyenv
   }
 
   /* Advances the playback clock at the pace of simulated time and consumes the frames.

@@ -144,9 +144,16 @@ obs, reward, terminated, truncated, info = env.step(np.array([150, 0, 0, 0]))
   neurons with `inputs=[...]`); **observations** are the kart state or the beat phase and
   the motor activations the legs actually produce; the simulation steps synchronously,
   about as fast as real time on a laptop.
+- **Watch it learn**: with `viewer=True` (`DriveEnv(viewer=True)`, or `--watch` in the
+  example), every simulated frame is streamed to the running server, and the 3D page
+  follows it by itself — the fly on its kart, its 3D brain, the gauges and the episode
+  notes, live, while your code trains in another process.
 - `examples/drive_hillclimb.py` learns a linear driving policy by hill climbing and saves
   it; `examples/live_policy.py` then drives the kart of the live 3D page with it, over
   HTTP (open `/fly`, choose Drive, run the script).
+- The page always renders the server's current session: its own, one a script started
+  over HTTP, or a streamed training run ("Watching …"; its keys are off, *Start
+  simulation* takes the server back).
 - The HTTP API drives any group of neurons in the live session (`POST /api/live/stim`)
   and streams the channel rates, the spikes and the kart state. Details in
   [API.md](API.md).
