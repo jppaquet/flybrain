@@ -1,17 +1,17 @@
-/* app.js - panneau de contrôle, lancement et suivi des simulations. */
+/* app.js - control panel, launching and tracking of simulations. */
 (() => {
   const $ = s => document.querySelector(s);
   const { fmt } = Charts;
-  const FIELDS = [["type", "type"], ["instance", "instance"], ["superclass", "superclasse"],
-                  ["class", "classe"], ["any", "tout"], ["body", "bodyId"]];
-  const GENERAL = [["t_ms", "Durée (ms)", 50], ["trials", "Essais", 1], ["seed", "Graine", 1]];
+  const FIELDS = [["type", "type"], ["instance", "instance"], ["superclass", "superclass"],
+                  ["class", "class"], ["any", "any"], ["body", "bodyId"]];
+  const GENERAL = [["t_ms", "Duration (ms)", 50], ["trials", "Trials", 1], ["seed", "Seed", 1]];
   const MODEL = [["dt", "dt (ms)", 0.05], ["tau_m", "τ mem. (ms)", 1], ["tau_syn", "τ syn. (ms)", 0.5],
-                 ["v_th", "Seuil (mV)", 0.5], ["refrac", "Réfract. (ms)", 0.1], ["delay", "Délai (ms)", 0.1],
-                 ["w_syn", "mV / synapse", 0.025], ["w_scale", "Échelle poids", 0.1], ["f_poi", "Poids Poisson", 10]];
+                 ["v_th", "Threshold (mV)", 0.5], ["refrac", "Refract. (ms)", 0.1], ["delay", "Delay (ms)", 0.1],
+                 ["w_syn", "mV / synapse", 0.025], ["w_scale", "Weight scale", 0.1], ["f_poi", "Poisson weight", 10]];
   const DEFAULT = {
     stims: [{ query: "^LC4$", field: "type", hz: 150, t_on: 0, t_off: "", label: "LC4" }],
-    readouts: [{ query: "^DNp01$", field: "type", label: "Fibre géante DNp01" },
-               { query: "^descending", field: "superclass", label: "Neurones descendants" }],
+    readouts: [{ query: "^DNp01$", field: "type", label: "Giant fiber DNp01" },
+               { query: "^descending", field: "superclass", label: "Descending neurons" }],
     silence: { query: "", field: "type" },
     params: { model: "shiu", t_ms: 500, trials: 1, seed: 0, w_scale: 1 },
   };
@@ -43,7 +43,7 @@
     return { header, arr };
   }
 
-  /* ------------------------------------------------------------ recherche */
+  /* ------------------------------------------------------------ search */
   const cache = new Map();
   function countInto(box, query, field) {
     clearTimeout(box._t);
@@ -57,33 +57,33 @@
         d = await r.json();
         if (r.ok) cache.set(key, d);
       }
-      if (d.error) { box.textContent = "motif invalide"; box.classList.add("bad"); return; }
+      if (d.error) { box.textContent = "invalid pattern"; box.classList.add("bad"); return; }
       box.classList.toggle("bad", d.count === 0);
-      box.textContent = d.count === 0 ? "aucun neurone"
-        : `${fmt(d.count)} neurone${d.count > 1 ? "s" : ""} · ` +
+      box.textContent = d.count === 0 ? "no neuron"
+        : `${fmt(d.count)} neuron${d.count > 1 ? "s" : ""} · ` +
           d.by_type.slice(0, 4).map(([t, n]) => `${t} (${n})`).join(", ") + (d.by_type.length > 4 ? "…" : "");
     }, 250);
   }
 
-  /* ------------------------------------------------------------ contrôles */
+  /* ------------------------------------------------------------ controls */
   function card(item, kind, onRemove) {
     const count = el("div", { class: "count" });
     const refresh = () => { save(); countInto(count, item.query, item.field); };
-    const q = el("input", { value: item.query, placeholder: "regex, ex. ^LC4$", spellcheck: false, "aria-label": "Motif",
+    const q = el("input", { value: item.query, placeholder: "regex, e.g. ^LC4$", spellcheck: false, "aria-label": "Pattern",
                             oninput: e => { item.query = e.target.value; refresh(); } });
-    const f = el("select", { "aria-label": "Champ", onchange: e => { item.field = e.target.value; refresh(); } },
+    const f = el("select", { "aria-label": "Field", onchange: e => { item.field = e.target.value; refresh(); } },
       ...FIELDS.map(([v, l]) => el("option", { value: v, textContent: l, selected: item.field === v })));
     const div = el("div", { class: "grp" });
     if (kind === "readout")
-      div.append(el("input", { class: "lbl", value: item.label || "", placeholder: "Libellé", "aria-label": "Libellé",
+      div.append(el("input", { class: "lbl", value: item.label || "", placeholder: "Label", "aria-label": "Label",
                                oninput: e => { item.label = e.target.value; save(); } }));
     div.append(el("div", { class: "q" }, q, f,
-      onRemove ? el("button", { class: "x", textContent: "✕", "aria-label": "Retirer", onclick: onRemove }) : null), count);
+      onRemove ? el("button", { class: "x", textContent: "✕", "aria-label": "Remove", onclick: onRemove }) : null), count);
     if (kind === "stim") {
       const num = (label, k, ph) => el("label", { class: "field" }, label,
         el("input", { type: "number", min: 0, value: item[k], placeholder: ph || "",
                       oninput: e => { item[k] = e.target.value === "" ? "" : +e.target.value; save(); } }));
-      div.append(el("div", { class: "nums" }, num("Fréq. (Hz)", "hz"), num("Début (ms)", "t_on"), num("Fin (ms)", "t_off", "fin")));
+      div.append(el("div", { class: "nums" }, num("Freq. (Hz)", "hz"), num("Start (ms)", "t_on"), num("End (ms)", "t_off", "end")));
     }
     refresh();
     return div;
@@ -111,15 +111,15 @@
     $("#params").replaceChildren(...GENERAL.map(inp), ...MODEL.filter(([k]) => k === "w_scale" || k in d).map(inp));
   }
 
-  const addStim = t => { cfg.stims.push({ hz: 150, t_on: 0, t_off: "", ...t }); save(); renderControls(); status(`Stimulation ajoutée : ${t.label || t.query}`); };
+  const addStim = t => { cfg.stims.push({ hz: 150, t_on: 0, t_off: "", ...t }); save(); renderControls(); status(`Stimulus added: ${t.label || t.query}`); };
   const addReadout = t => {
-    if (cfg.readouts.length >= 4) return status("4 readouts au maximum", true);
-    cfg.readouts.push({ ...t }); save(); renderControls(); status(`Readout ajouté : ${t.label || t.query}`);
+    if (cfg.readouts.length >= 4) return status("4 readouts at most", true);
+    cfg.readouts.push({ ...t }); save(); renderControls(); status(`Readout added: ${t.label || t.query}`);
   };
   const addSilence = body => {
     const s = cfg.silence;
     if (s.field === "body" && s.query.trim()) s.query += `, ${body}`; else { s.field = "body"; s.query = String(body); }
-    save(); renderControls(); status(`Neurone ${body} silencié`);
+    save(); renderControls(); status(`Neuron ${body} silenced`);
   };
 
   /* ------------------------------------------------------------ simulation */
@@ -135,7 +135,7 @@
     $("#run").disabled = true; $("#cancel").hidden = false;
     $("#results").classList.add("stale");
     $("#progbar").style.width = "0";
-    status("Démarrage…");
+    status("Starting…");
     try {
       const r = await fetch("/api/run", { method: "POST", body: JSON.stringify(body) });
       const d = await r.json();
@@ -148,14 +148,14 @@
         if (job !== d.job) return;
         $("#progbar").style.width = `${Math.round(st.progress * 100)}%`;
         if (st.state !== "running") break;
-        status(`${Math.round(st.progress * 100)} % · ${fmt(st.spikes)} décharges`);
+        status(`${Math.round(st.progress * 100)} % · ${fmt(st.spikes)} spikes`);
       }
       if (st.state === "error") throw new Error(st.error);
-      if (st.state === "cancelled") { status("Simulation annulée"); $("#results").classList.remove("stale"); return; }
-      status("Transfert des résultats…");
+      if (st.state === "cancelled") { status("Simulation cancelled"); $("#results").classList.remove("stale"); return; }
+      status("Transferring the results…");
       const res = await unpack(await fetch(`/api/job/${d.job}/result`));
       Results.render(res);
-      status(`Terminé · ${fmt(res.header.wall_s, 1)} s de calcul`);
+      status(`Done · ${fmt(res.header.wall_s, 1)} s of compute`);
     } catch (e) {
       status(e.message || String(e), true);
       $("#results").classList.remove("stale");
@@ -169,8 +169,8 @@
     try {
       const { header, arr } = await unpack(await fetch("/api/meta"));
       META = { ...header, ...arr };
-    } catch (e) { return status("Impossible de charger le connectome : " + e.message, true); }
-    $("#netstats").textContent = `MaleCNS v1.0 · ${fmt(META.N)} neurones · ${fmt(META.n_edges)} connexions · ${fmt(META.n_synapses)} synapses`;
+    } catch (e) { return status("Cannot load the connectome: " + e.message, true); }
+    $("#netstats").textContent = `MaleCNS v1.0 · ${fmt(META.N)} neurons · ${fmt(META.n_edges)} connections · ${fmt(META.n_synapses)} synapses`;
     for (const [sel, list] of [["#stim-preset", META.presets.stim], ["#ro-preset", META.presets.readout]])
       list.forEach((p, k) => $(sel).append(el("option", { value: k, textContent: p.label })));
     $("#stim-preset").addEventListener("change", e => {
@@ -193,7 +193,7 @@
     renderControls();
     Results.init(META, { addStim, addReadout, addSilence });
     $("#run").disabled = false;
-    status("Prêt · ⌘/Ctrl + Entrée pour simuler");
+    status("Ready · ⌘/Ctrl + Enter to simulate");
     run();
   }
   init();

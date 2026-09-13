@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 """
-flysim - simulateur "leaky integrate-and-fire" sur le connectome MaleCNS v1.0.
+flysim - "leaky integrate-and-fire" simulator on the MaleCNS v1.0 connectome.
 
-Modèle (d'après Shiu et al., Nature 2024, sur le connectome femelle) :
-  - potentiel de membrane v en mV au-dessus du repos, fuite de constante tau
-  - décharge quand v >= seuil, puis reset à 0 et période réfractaire
-  - une synapse = 0.275 mV ; le poids d'une connexion = nb de synapses x signe
-  - signe : acétylcholine -> excitateur ; GABA et glutamate -> inhibiteurs
+Model (after Shiu et al., Nature 2024, on the female connectome):
+  - membrane potential v in mV above rest, leak with time constant tau
+  - spike when v >= threshold, then reset to 0 and refractory period
+  - one synapse = 0.275 mV; the weight of a connection = number of synapses x sign
+  - sign: acetylcholine -> excitatory; GABA and glutamate -> inhibitory
 
-Sous-commandes :
-  python flysim.py types  [motif]      liste les types de neurones (regex)
-  python flysim.py info   <motif>      détail des neurones qui matchent
-  python flysim.py run --stim MOTIF [--readout MOTIF] [--ms 300] [--hz 150]
+Subcommands:
+  python flysim.py types  [pattern]    list neuron types (regex)
+  python flysim.py info   <pattern>    details of the matching neurons
+  python flysim.py run --stim PATTERN [--readout PATTERN] [--ms 300] [--hz 150]
 """
 import argparse, os, re, sys, time
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# --------------------------------------------------------------- paramètres
-TAU_MS      = 5.0     # constante de temps membranaire
-V_THRESH    = 7.0     # mV au-dessus du repos
+# --------------------------------------------------------------- parameters
+TAU_MS      = 5.0     # membrane time constant
+V_THRESH    = 7.0     # mV above rest
 REFRAC_MS   = 2.2
-SYN_MV      = 0.275   # contribution d'une synapse
+SYN_MV      = 0.275   # contribution of one synapse
 DT_MS       = 0.2
 
 
@@ -33,7 +33,7 @@ class Brain:
         self.indices = g["indices"]
         self.sign    = g["sign"].astype(np.float32)
         self.body    = g["body"]
-        # poids signé, en mV, porté par le neurone présynaptique
+        # signed weight, in mV, carried by the presynaptic neuron
         self.w = (g["weight"].astype(np.float32) * SYN_MV)
         self.N = len(self.indptr) - 1
         pre_of_edge = np.repeat(np.arange(self.N, dtype=np.int32), np.diff(self.indptr))
@@ -63,8 +63,8 @@ class Brain:
 
     # ------------------------------------------------------------- simulation
     def run(self, stim, ms=300.0, hz=150.0, stim_ms=None, seed=0, record=None):
-        """stim : indices forcés à décharger à `hz` Hz pendant `stim_ms`.
-        Retourne (n_spikes par neurone, raster {t: idx}, trace du readout)."""
+        """stim: indices forced to fire at `hz` Hz for `stim_ms`.
+        Returns (spikes per neuron, raster {t: idx}, readout trace)."""
         rng = np.random.default_rng(seed)
         steps = int(ms / DT_MS)
         stim_steps = steps if stim_ms is None else int(stim_ms / DT_MS)
@@ -72,7 +72,7 @@ class Brain:
         refrac_steps = int(REFRAC_MS / DT_MS)
 
         v = np.zeros(self.N, dtype=np.float32)
-        until = np.zeros(self.N, dtype=np.int32)      # fin de période réfractaire
+        until = np.zeros(self.N, dtype=np.int32)      # end of the refractory period
         nspk = np.zeros(self.N, dtype=np.int32)
         p_stim = hz * DT_MS / 1000.0
         raster_t, raster_i = [], []
@@ -93,7 +93,7 @@ class Brain:
                 raster_t.append(np.full(len(fired), s * DT_MS, dtype=np.float32))
                 raster_i.append(fired.astype(np.int32))
                 if trace is not None: trace[s] = int(rec[fired].sum())
-                # propagation : concaténation des lignes CSR des neurones actifs
+                # propagation: concatenation of the CSR rows of the active neurons
                 st, en = self.indptr[fired], self.indptr[fired + 1]
                 cnt = en - st
                 tot = int(cnt.sum())
@@ -107,12 +107,12 @@ class Brain:
                     v *= decay
             else:
                 v *= decay
-            v[until > s] = 0.0                       # neurones en période réfractaire
+            v[until > s] = 0.0                       # neurons in their refractory period
         dur = time.time() - t0
         rt = np.concatenate(raster_t) if raster_t else np.zeros(0, np.float32)
         ri = np.concatenate(raster_i) if raster_i else np.zeros(0, np.int32)
-        print(f"  ({steps} pas de {DT_MS} ms simulés en {dur:.1f} s, "
-              f"{int(nspk.sum()):,} décharges)", file=sys.stderr)
+        print(f"  ({steps} steps of {DT_MS} ms simulated in {dur:.1f} s, "
+              f"{int(nspk.sum()):,} spikes)", file=sys.stderr)
         return nspk, (rt, ri), trace
 
 
@@ -122,42 +122,42 @@ def cmd_types(b, a):
     c = Counter(t for t in b.type if t and (rx is None or rx.search(t)))
     for t, n in c.most_common(a.top):
         print(f"{n:6d}  {t}")
-    print(f"\n{len(c):,} types distincts, {sum(c.values()):,} neurones")
+    print(f"\n{len(c):,} distinct types, {sum(c.values()):,} neurons")
 
 
 def cmd_info(b, a):
     idx = b.find(a.pattern)
-    print(f"{len(idx)} neurones pour /{a.pattern}/")
+    print(f"{len(idx)} neurons for /{a.pattern}/")
     for i in idx[: a.top]:
         deg_out = b.indptr[i + 1] - b.indptr[i]
         print(f"  [{i:6d}] body={b.body[i]:<12} type={b.type[i]:<20} "
               f"class={b.klass[i]:<14} side={b.side[i]:<6} nt={b.nt[i]:<8} "
-              f"sortantes={deg_out}")
+              f"outputs={deg_out}")
 
 
 def cmd_run(b, a):
     stim = b.find(a.stim)
-    if not len(stim): sys.exit(f"aucun neurone ne matche /{a.stim}/")
+    if not len(stim): sys.exit(f"no neuron matches /{a.stim}/")
     read = b.find(a.readout) if a.readout else np.zeros(0, np.int32)
-    print(f"Stimulation : {len(stim)} neurones /{a.stim}/ à {a.hz} Hz pendant {a.ms} ms")
-    if len(read): print(f"Lecture     : {len(read)} neurones /{a.readout}/")
+    print(f"Stimulation: {len(stim)} neurons /{a.stim}/ at {a.hz} Hz for {a.ms} ms")
+    if len(read): print(f"Readout    : {len(read)} neurons /{a.readout}/")
     nspk, (rt, ri), trace = b.run(stim, ms=a.ms, hz=a.hz, record=read)
 
     order = np.argsort(-nspk)
-    print("\nNeurones les plus actifs (hors stimulation) :")
+    print("\nMost active neurons (excluding the stimulated ones):")
     shown = 0
     stimset = set(stim.tolist())
     for i in order:
         if i in stimset or nspk[i] == 0: continue
-        print(f"  {nspk[i]:5d} décharges  {b.type[i] or b.inst[i]:<24} "
+        print(f"  {nspk[i]:5d} spikes  {b.type[i] or b.inst[i]:<24} "
               f"{b.klass[i]:<14} {b.side[i]:<5} {b.nt[i]}")
         shown += 1
         if shown >= a.top: break
     if len(read):
         tot = int(nspk[read].sum())
         act = int((nspk[read] > 0).sum())
-        print(f"\nReadout /{a.readout}/ : {tot:,} décharges, "
-              f"{act}/{len(read)} neurones actifs")
+        print(f"\nReadout /{a.readout}/: {tot:,} spikes, "
+              f"{act}/{len(read)} neurons active")
     np.savez(os.path.join(HERE, "last_run.npz"), nspk=nspk, rt=rt, ri=ri,
              stim=stim, read=read, trace=trace if trace is not None else np.zeros(0))
     print("\n-> last_run.npz")

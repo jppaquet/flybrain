@@ -1,4 +1,4 @@
-/* results.js - rendu d'un résultat de simulation, tableaux, inspecteur. */
+/* results.js - rendering of a simulation result, tables, inspector. */
 const Results = (() => {
   const $ = s => document.querySelector(s);
   const { fmt, groupColor, css } = Charts;
@@ -23,8 +23,8 @@ const Results = (() => {
     const rows = [rate ? { value: `${fmt(rate[i])} Hz`, label: typeName(i) } : { value: typeName(i) }];
     const side = M.sides[M.side[i]], nt = M.nt_names[M.nt[i]] || "NT ?";
     rows.push({ cls: "tl", label: `${M.groups[M.group[i]]} · ${nt}${side ? " · " + side : ""}` });
-    if (stimSet && stimSet[i]) rows.push({ cls: "tl", label: "stimulé" });
-    if (M.pos_est[i]) rows.push({ cls: "tl", label: "position estimée (pas de soma)" });
+    if (stimSet && stimSet[i]) rows.push({ cls: "tl", label: "stimulated" });
+    if (M.pos_est[i]) rows.push({ cls: "tl", label: "estimated position (no soma)" });
     return rows;
   }
 
@@ -65,18 +65,18 @@ const Results = (() => {
 
   function redraw() { brain.draw(); roChart.draw(); grpChart.draw(); raster.draw(); buildBrainLegend(); }
 
-  /* ------------------------------------------------------------ carte */
+  /* ------------------------------------------------------------ map */
   function buildBrainLegend() {
     const L = $("#brain-legend"); L.replaceChildren();
     const vmax = frame == null ? rateMax : frameMax;
     L.append(el("span", {}, "0"), el("span", { class: "ramp", style: { background: Charts.rampCSS() } }),
-             el("span", {}, `${fmt(vmax)} Hz · échelle log`), el("span", { style: { flex: "1" } }));
-    L.append(el("span", { class: "hint" }, "Isoler :"));
+             el("span", {}, `${fmt(vmax)} Hz · log scale`), el("span", { style: { flex: "1" } }));
+    L.append(el("span", { class: "hint" }, "Isolate:"));
     const chip = (label, g) => el("button", {
       class: "ghost small" + (isolate === g ? " on" : ""), textContent: label,
       onclick: () => { isolate = g; brain.setIsolate(g); buildBrainLegend(); },
     });
-    L.append(chip("Tous", null));
+    L.append(chip("All", null));
     M.groups.forEach((g, k) => { if (M.group_sizes[k]) L.append(chip(g, k)); });
   }
 
@@ -98,7 +98,7 @@ const Results = (() => {
     $("#cumul").classList.toggle("on", f == null);
     if (f == null) {
       brain.setValue(rate, rateMax);
-      $("#tlabel").textContent = "cumul";
+      $("#tlabel").textContent = "cumulative";
       [roChart, grpChart, raster].forEach(c => c.cursor(null));
     } else {
       $("#scrub").value = f;
@@ -120,7 +120,7 @@ const Results = (() => {
   }
   function stop() { clearInterval(timer); timer = null; $("#play").textContent = "▶"; }
 
-  /* ------------------------------------------------------------ rendu */
+  /* ------------------------------------------------------------ render */
   function render(res) {
     stop(); R = res; frameVal = null;
     const h = res.header, a = res.arr, N = M.N, T = h.params.t_ms, K = h.params.trials, nb = h.nbins;
@@ -141,17 +141,17 @@ const Results = (() => {
 
     const ro = h.readouts.map((r, k) => {
       const values = Array.from(a.readouts.subarray(k * nb, (k + 1) * nb));
-      return { label: r.label, sub: `${fmt(r.n)} neurones · pic ${fmt(Math.max(...values))} Hz`, color: css("--ink-2"), values };
+      return { label: r.label, sub: `${fmt(r.n)} neurons · peak ${fmt(Math.max(...values))} Hz`, color: css("--ink-2"), values };
     });
     roChart.set({ panels: ro, bin_ms: h.bin_ms, T, windows });
-    $("#ro-legend").textContent = ro.length ? "" : "Aucun readout : ajoute-en un dans le panneau de gauche.";
+    $("#ro-legend").textContent = ro.length ? "" : "No readout: add one in the left panel.";
 
     const active = new Int32Array(M.groups.length);
     for (const i of a.active) if (!stimSet[i]) active[M.group[i]]++;
     const gp = [];
     M.groups.forEach((g, k) => {
       if (!M.group_sizes[k]) return;
-      gp.push({ label: g, sub: `${fmt(active[k])} / ${fmt(M.group_sizes[k])} actifs`, color: groupColor(k),
+      gp.push({ label: g, sub: `${fmt(active[k])} / ${fmt(M.group_sizes[k])} active`, color: groupColor(k),
                 values: Array.from(a.groups.subarray(k * nb, (k + 1) * nb)) });
     });
     grpChart.set({ panels: gp, bin_ms: h.bin_ms, T, windows });
@@ -161,11 +161,11 @@ const Results = (() => {
     for (let r = 0; r < n; r++) {
       rowGroup[r] = M.group[rows[r]];
       blockKey[r] = role[r] < 9 ? role[r] : 10 + M.group[rows[r]];
-      blockLabel[r] = role[r] === 0 ? "Stimulés" : role[r] < 9 ? h.readouts[role[r] - 1].label : M.groups[M.group[rows[r]]];
+      blockLabel[r] = role[r] === 0 ? "Stimulated" : role[r] < 9 ? h.readouts[role[r] - 1].label : M.groups[M.group[rows[r]]];
     }
     raster.set({ rows, rowGroup, blockKey, blockLabel, spk_row: a.spk_row, spk_t: a.spk_t, T, windows });
-    $("#raster-sub").textContent = `Essai 1 · ${fmt(n)} neurones : stimulés, readouts puis les plus actifs par groupe` +
-      (h.raster_truncated ? " · décharges sous-échantillonnées" : "");
+    $("#raster-sub").textContent = `Trial 1 · ${fmt(n)} neurons: stimulated, readouts, then the most active per group` +
+      (h.raster_truncated ? " · spikes subsampled" : "");
     const RL = $("#raster-legend"); RL.replaceChildren();
     M.groups.forEach((g, k) => { if (M.group_sizes[k]) RL.append(el("span", {}, el("span", { class: "sw", style: { background: groupColor(k) } }), g)); });
 
@@ -177,16 +177,16 @@ const Results = (() => {
 
   function kpis(h, N, T, K) {
     const tiles = [
-      ["Neurones recrutés", fmt(h.n_active_nonstim), `${(100 * h.n_active_nonstim / N).toFixed(1).replace(".", ",")} % du CNS · hors ${fmt(h.n_stim)} stimulés`],
-      ["Décharges", fmt(h.total_spikes), K > 1 ? `${fmt(h.total_spikes / K)} par essai` : `en ${fmt(T)} ms simulées`],
-      ["Taux moyen des actifs", `${fmt(h.mean_rate_active)} Hz`, h.n_silenced ? `${fmt(h.n_silenced)} neurones silenciés` : "sur toute la durée"],
-      ["Calcul", `${fmt(h.wall_s, 1)} s`, `${fmt(h.steps)} pas × ${K} essai${K > 1 ? "s" : ""} · dt ${String(h.params.dt).replace(".", ",")} ms`],
+      ["Recruited neurons", fmt(h.n_active_nonstim), `${(100 * h.n_active_nonstim / N).toFixed(1)} % of the CNS · excluding ${fmt(h.n_stim)} stimulated`],
+      ["Spikes", fmt(h.total_spikes), K > 1 ? `${fmt(h.total_spikes / K)} per trial` : `in ${fmt(T)} ms simulated`],
+      ["Mean rate of active neurons", `${fmt(h.mean_rate_active)} Hz`, h.n_silenced ? `${fmt(h.n_silenced)} neurons silenced` : "over the whole run"],
+      ["Compute", `${fmt(h.wall_s, 1)} s`, `${fmt(h.steps)} steps × ${K} trial${K > 1 ? "s" : ""} · dt ${h.params.dt} ms`],
     ];
     $("#kpis").replaceChildren(...tiles.map(([l, v, d]) =>
       el("div", { class: "kpi" }, el("div", { class: "label" }, l), el("div", { class: "value" }, v), el("div", { class: "detail" }, d))));
   }
 
-  /* ------------------------------------------------------------ tableaux */
+  /* ------------------------------------------------------------ tables */
   function table(tbl, cols, rows, sort, rerender, onClick, limit = 300) {
     const k = sort.key, dir = sort.asc ? 1 : -1;
     rows.sort((p, q) => (p[k] < q[k] ? -dir : p[k] > q[k] ? dir : 0));
@@ -200,7 +200,7 @@ const Results = (() => {
       for (const c of cols) tr.append(el("td", { class: c.num ? "num" : "" }, ...[].concat(c.cell ? c.cell(r) : String(r[c.key]))));
       tbody.append(tr);
     }
-    const foot = rows.length > limit ? el("tfoot", {}, el("tr", {}, el("td", { colSpan: cols.length, class: "muted" }, `… ${fmt(rows.length - limit)} lignes de plus (affine le filtre)`))) : null;
+    const foot = rows.length > limit ? el("tfoot", {}, el("tr", {}, el("td", { colSpan: cols.length, class: "muted" }, `… ${fmt(rows.length - limit)} more rows (refine the filter)`))) : null;
     tbl.replaceChildren(thead, tbody, ...(foot ? [foot] : []));
   }
   const regex = s => { try { return s ? new RegExp(s, "i") : null; } catch { return /$^/; } };
@@ -216,11 +216,11 @@ const Results = (() => {
       rows.push({ i, name, group: M.group[i], nt: M.nt_names[M.nt[i]], rate: rate[i], n: a.active_n[k] / K });
     }
     table($("#top-table"), [
-      { key: "name", label: "Neurone", cell: r => [r.name, M.sides[M.side[r.i]] ? ` ${M.sides[M.side[r.i]]}` : "", stimSet[r.i] ? el("span", { class: "tag stim", textContent: " stim" }) : null] },
-      { key: "group", label: "Groupe", cell: r => [gdot(r.group), M.groups[r.group]] },
+      { key: "name", label: "Neuron", cell: r => [r.name, M.sides[M.side[r.i]] ? ` ${M.sides[M.side[r.i]]}` : "", stimSet[r.i] ? el("span", { class: "tag stim", textContent: " stim" }) : null] },
+      { key: "group", label: "Group", cell: r => [gdot(r.group), M.groups[r.group]] },
       { key: "nt", label: "NT" },
-      { key: "rate", label: "Taux (Hz)", num: true, cell: r => [fmt(r.rate), el("span", { class: "bar", style: { width: `${Math.max(1, 48 * r.rate / rateMax)}px` } })] },
-      { key: "n", label: "Décharges", num: true, cell: r => fmt(r.n) },
+      { key: "rate", label: "Rate (Hz)", num: true, cell: r => [fmt(r.rate), el("span", { class: "bar", style: { width: `${Math.max(1, 48 * r.rate / rateMax)}px` } })] },
+      { key: "n", label: "Spikes", num: true, cell: r => fmt(r.n) },
     ], rows, topSort, renderTop, r => inspect(r.i));
   }
 
@@ -235,15 +235,15 @@ const Results = (() => {
     }
     const rows = [];
     for (const g of agg.values()) {
-      const name = M.types[g.tid] || "(sans type)";
+      const name = M.types[g.tid] || "(untyped)";
       if (rx && !rx.test(name)) continue;
       rows.push({ ...g, name, n: typeCount[g.tid], frac: g.act / typeCount[g.tid], mean: g.sum / typeCount[g.tid] });
     }
     table($("#type-table"), [
       { key: "name", label: "Type", cell: r => [r.name, r.stim ? el("span", { class: "tag stim", textContent: " stim" }) : null] },
-      { key: "group", label: "Groupe", cell: r => [gdot(r.group), M.groups[r.group]] },
-      { key: "frac", label: "Actifs", num: true, cell: r => `${r.act} / ${r.n}` },
-      { key: "mean", label: "Taux moyen (Hz)", num: true, cell: r => fmt(r.mean) },
+      { key: "group", label: "Group", cell: r => [gdot(r.group), M.groups[r.group]] },
+      { key: "frac", label: "Active", num: true, cell: r => `${r.act} / ${r.n}` },
+      { key: "mean", label: "Mean rate (Hz)", num: true, cell: r => fmt(r.mean) },
       { key: "max", label: "Max (Hz)", num: true, cell: r => fmt(r.max) },
     ], rows, typeSort, renderTypes, r => {
       $("#top-filter").value = `^${r.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`; renderTop();
@@ -257,7 +257,7 @@ const Results = (() => {
     const series = which === "readout"
       ? h.readouts.map((r, k) => [r.label, a.readouts.subarray(k * nb, (k + 1) * nb)])
       : M.groups.map((g, k) => [g, a.groups.subarray(k * nb, (k + 1) * nb)]).filter((_, k) => M.group_sizes[k]);
-    $("#td-title").textContent = which === "readout" ? "Readouts — taux (Hz) par bin" : "Groupes — taux (Hz) par bin";
+    $("#td-title").textContent = which === "readout" ? "Readouts — rate (Hz) per bin" : "Groups — rate (Hz) per bin";
     const t = $("#td-table");
     t.replaceChildren(
       el("thead", {}, el("tr", {}, el("th", { class: "num", textContent: "t (ms)" }), ...series.map(([l]) => el("th", { class: "num", textContent: l })))),
@@ -267,7 +267,7 @@ const Results = (() => {
     $("#table-dialog").showModal();
   }
 
-  /* ------------------------------------------------------------ inspecteur */
+  /* ------------------------------------------------------------ inspector */
   async function inspect(i) {
     sel = i; brain.select(i);
     const r = await fetch(`/api/neuron/${i}`);
@@ -277,26 +277,26 @@ const Results = (() => {
     const title = d.type || d.instance || `#${d.body}`;
     $("#insp-title").textContent = title;
     const kv = [
-      ["Instance", d.instance || "–"], ["bodyId", String(d.body)], ["Superclasse", d.superclass || "–"],
-      ["Classe", [d.klass, d.subclass].filter(Boolean).join(" · ") || "–"], ["Côté", d.side || "–"],
-      ["Neurotransmetteur", d.nt || "–"], ["Groupe", d.group],
-      ["Connexions", `${fmt(d.n_in)} entrantes (${fmt(d.syn_in)} syn.) · ${fmt(d.n_out)} sortantes (${fmt(d.syn_out)} syn.)`],
-      ["Position", d.pos_est ? "estimée (pas de soma annoté)" : "soma"],
+      ["Instance", d.instance || "–"], ["bodyId", String(d.body)], ["Superclass", d.superclass || "–"],
+      ["Class", [d.klass, d.subclass].filter(Boolean).join(" · ") || "–"], ["Side", d.side || "–"],
+      ["Neurotransmitter", d.nt || "–"], ["Group", d.group],
+      ["Connections", `${fmt(d.n_in)} inputs (${fmt(d.syn_in)} syn.) · ${fmt(d.n_out)} outputs (${fmt(d.syn_out)} syn.)`],
+      ["Position", d.pos_est ? "estimated (no annotated soma)" : "soma"],
     ];
-    if (rate) kv.unshift(["Taux simulé", `${fmt(rate[i])} Hz${stimSet[i] ? " (stimulé)" : ""}`]);
+    if (rate) kv.unshift(["Simulated rate", `${fmt(rate[i])} Hz${stimSet[i] ? " (stimulated)" : ""}`]);
     const dl = el("dl", { class: "kv" });
     for (const [k, v] of kv) dl.append(el("dt", { textContent: k }), el("dd", { textContent: v }));
     const target = { query: String(d.body), field: "body", label: title };
     const actions = el("div", { class: "insp-actions" },
-      el("button", { class: "ghost small", textContent: "Stimuler", onclick: () => hooks.addStim(target) }),
+      el("button", { class: "ghost small", textContent: "Stimulate", onclick: () => hooks.addStim(target) }),
       el("button", { class: "ghost small", textContent: "Readout", onclick: () => hooks.addReadout(target) }),
-      el("button", { class: "ghost small", textContent: "Silencier", onclick: () => hooks.addSilence(d.body) }),
-      el("button", { class: "ghost small", textContent: "Tout le type", disabled: !d.type,
+      el("button", { class: "ghost small", textContent: "Silence", onclick: () => hooks.addSilence(d.body) }),
+      el("button", { class: "ghost small", textContent: "Whole type", disabled: !d.type,
                       onclick: () => hooks.addStim({ query: `^${d.type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, field: "type", label: d.type }) }));
     const partners = (list, label, total) => {
       const t = el("table");
-      t.append(el("thead", {}, el("tr", {}, el("th", { textContent: "Partenaire" }), el("th", { class: "num", textContent: "Syn." }),
-        el("th", { textContent: "NT" }), el("th", { class: "num", textContent: "Taux" }))));
+      t.append(el("thead", {}, el("tr", {}, el("th", { textContent: "Partner" }), el("th", { class: "num", textContent: "Syn." }),
+        el("th", { textContent: "NT" }), el("th", { class: "num", textContent: "Rate" }))));
       const tb = el("tbody");
       for (const p of list) tb.append(el("tr", { onclick: () => inspect(p.idx) },
         el("td", { textContent: p.instance || p.type || `#${p.idx}` }),
@@ -304,10 +304,10 @@ const Results = (() => {
         el("td", { textContent: p.nt || "?" }),
         el("td", { class: "num", textContent: rate ? fmt(rate[p.idx]) : "–" })));
       t.append(tb);
-      return [el("h4", { textContent: `${label} (${fmt(list.length)} premiers sur ${fmt(total)})` }), t];
+      return [el("h4", { textContent: `${label} (top ${fmt(list.length)} of ${fmt(total)})` }), t];
     };
     $("#insp-body").replaceChildren(dl, actions,
-      ...partners(d.inputs, "Entrées", d.n_in), ...partners(d.outputs, "Sorties", d.n_out));
+      ...partners(d.inputs, "Inputs", d.n_in), ...partners(d.outputs, "Outputs", d.n_out));
     $("#inspector").hidden = false;
   }
 

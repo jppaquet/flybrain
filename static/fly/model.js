@@ -1,5 +1,5 @@
-/* model.js - Drosophila melanogaster mâle, procédurale et articulée (unités : mm).
-   Repère : +Z vers l'avant, +Y vers le haut, +X vers la gauche de la mouche. */
+/* model.js - male Drosophila melanogaster, procedural and articulated (units: mm).
+   Frame: +Z forward, +Y up, +X to the fly's left. */
 import * as THREE from "three";
 
 const COL = {
@@ -15,8 +15,8 @@ const cuticle = (color, extra = {}) => new THREE.MeshPhysicalMaterial({
 });
 const shade = m => { m.castShadow = true; m.receiveShadow = true; return m; };
 
-/* Ellipsoïde ; colorFn(x, y, z, color) peut teinter chaque sommet (sphère unité)
-   et renvoyer un facteur radial (sillons entre segments). */
+/* Ellipsoid; colorFn(x, y, z, color) can tint each vertex (unit sphere)
+   and return a radial factor (grooves between segments). */
 function ellipsoid(rx, ry, rz, material, colorFn, seg = 44) {
   const g = new THREE.SphereGeometry(1, seg, Math.round(seg * 0.7));
   if (colorFn) {
@@ -34,7 +34,7 @@ function ellipsoid(rx, ry, rz, material, colorFn, seg = 44) {
   return shade(new THREE.Mesh(g, material));
 }
 
-/* Segment de patte le long de +X, du rayon r0 (proximal) à r1 (distal). */
+/* Leg segment along +X, from radius r0 (proximal) to r1 (distal). */
 function segment(len, r0, r1, material) {
   const g = new THREE.CylinderGeometry(r1, r0, len, 14, 3);
   g.rotateZ(-Math.PI / 2); g.translate(len / 2, 0, 0);
@@ -78,7 +78,7 @@ function facetTexture() {
   return t;
 }
 
-// aile : x = envergure (0 → 2,1 mm), y = corde (costa côté y négatif)
+// wing: x = span (0 → 2.1 mm), y = chord (costa on the negative y side)
 const WX = [-0.05, 2.15], WY = [-0.5, 0.55];
 const wingUV = (x, y) => [(x - WX[0]) / (WX[1] - WX[0]), 1 - (y - WY[0]) / (WY[1] - WY[0])];
 function wingShape() {
@@ -101,13 +101,13 @@ function wingTexture() {
   g.fillStyle = "rgba(210,220,235,0.26)"; g.fill();
   g.strokeStyle = "rgba(90,70,45,0.9)"; g.lineCap = g.lineJoin = "round";
   g.lineWidth = 7; path(outline.slice(0, 48)); g.stroke();              // costa
-  g.lineWidth = 2.5; path(outline); g.closePath(); g.stroke();          // bord
+  g.lineWidth = 2.5; path(outline); g.closePath(); g.stroke();          // edge
   const veins = [
     [[0.12, -0.06], [0.7, -0.2], [1.2, -0.31], [1.58, -0.39]],             // L2
     [[0.12, 0.0], [0.8, -0.05], [1.5, -0.08], [2.04, -0.06]],               // L3
     [[0.16, 0.05], [0.8, 0.09], [1.45, 0.16], [1.98, 0.24]],                // L4
     [[0.2, 0.11], [0.7, 0.2], [1.1, 0.3], [1.52, 0.45]],                    // L5
-    [[0.83, -0.05], [0.84, 0.09]], [[1.27, 0.17], [1.24, 0.33]],            // nervures transverses
+    [[0.83, -0.05], [0.84, 0.09]], [[1.27, 0.17], [1.24, 0.33]],            // cross veins
   ];
   g.lineWidth = 4.5;
   for (const v of veins) { path(v); g.stroke(); }
@@ -119,19 +119,19 @@ function wingGeometry(side) {
   const g = new THREE.ShapeGeometry(wingShape(), 40);
   const pos = g.attributes.position, uv = g.attributes.uv;
   for (let i = 0; i < pos.count; i++) uv.setXY(i, ...wingUV(pos.getX(i), pos.getY(i)));
-  g.rotateX(-Math.PI / 2);                  // y -> -z : costa vers +z
+  g.rotateX(-Math.PI / 2);                  // y -> -z: costa toward +z
   g.scale(0.85, 1, 0.85);
-  if (side < 0) g.scale(1, 1, -1);          // aile droite en miroir
+  if (side < 0) g.scale(1, 1, -1);          // right wing mirrored
   return g;
 }
 
-/* ---------------------------------------------------------------- pattes */
+/* ------------------------------------------------------------------ legs */
 const LEGS = {
   T1: { at: [0.11, -0.22, 0.27], foot: [0.55, 0.85], c: -1.15, L: [0.2, 0.48, 0.42, 0.46] },
   T2: { at: [0.14, -0.27, 0.02], foot: [0.9, 0.1], c: -1.25, L: [0.15, 0.52, 0.5, 0.5] },
   T3: { at: [0.12, -0.24, -0.22], foot: [0.72, -0.68], c: -1.2, L: [0.17, 0.58, 0.56, 0.54] },
 };
-const TARSUS_TILT = 0.5;   // angle du tarse avec le sol
+const TARSUS_TILT = 0.5;   // angle of the tarsus with the ground
 
 function buildLeg(thorax, name, side, mat, dark) {
   const d = LEGS[name], [Lc, Lf, Lt, Ls] = d.L;
@@ -144,15 +144,15 @@ function buildLeg(thorax, name, side, mat, dark) {
   femur.add(segment(Lf, 0.054, 0.042, mat));
   tibia.add(segment(Lt, 0.039, 0.031, mat));
   tarsus.add(segment(Ls, 0.029, 0.017, mat));
-  for (let k = 1; k < 5; k++) {       // tarsomères
+  for (let k = 1; k < 5; k++) {       // tarsomeres
     const b = shade(new THREE.Mesh(new THREE.SphereGeometry(0.024 - k * 0.002, 10, 8), mat));
     b.position.x = Ls * (0.36 + k * 0.15); tarsus.add(b);
   }
-  for (const s of [-1, 1]) {           // griffes
+  for (const s of [-1, 1]) {           // claws
     const cl = new THREE.Mesh(new THREE.ConeGeometry(0.008, 0.05, 6), dark);
     cl.rotation.z = -Math.PI / 2 - 0.5; cl.position.set(Ls + 0.012, -0.01, s * 0.012); tarsus.add(cl);
   }
-  if (name === "T1") {                 // peigne sexuel du mâle
+  if (name === "T1") {                 // male sex comb
     for (let k = 0; k < 9; k++) {
       const tooth = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.03, 0.006), dark);
       tooth.position.set(0.05 + k * 0.009, -0.025, 0.018); tarsus.add(tooth);
@@ -187,7 +187,7 @@ function solveLeg(leg, footW) {
   leg.tibia.rotation.z = tt - tf; leg.tarsus.rotation.z = ts - tt;
 }
 
-/* ------------------------------------------------------------------ mouche */
+/* ------------------------------------------------------------------- fly */
 export const REST = {
   height: 0.6, pitch: 0.05, roll: 0, yaw: 0, headYaw: 0, headPitch: 0, headRoll: 0,
   abdPitch: -0.08, abdYaw: 0, abdRoll: 0, abd2Pitch: -0.06, wingSpreadL: 0, wingSpreadR: 0,
@@ -200,16 +200,16 @@ export function createFly() {
   const legMat = cuticle(COL.leg, { roughness: 0.5, clearcoat: 0.4 });
   const dark = new THREE.MeshStandardMaterial({ color: COL.bristle, roughness: 0.6 });
 
-  // thorax : dessus plus sombre, flancs clairs
+  // thorax: darker top, pale sides
   const cThorax = col(COL.thorax), cPale = col(COL.pale), cTop = col(0x6f4a25);
   thorax.add(ellipsoid(0.34, 0.33, 0.47, cuticle(0xffffff, { vertexColors: true }), (x, y, z, c) => {
     c.copy(cThorax).lerp(cPale, THREE.MathUtils.smoothstep(-y, 0.1, 0.8) * 0.7);
-    if (y > 0.5 && Math.abs(Math.abs(x) - 0.18) < 0.07) c.lerp(cTop, 0.5);   // bandes dorsales
-    return 1 - 0.07 * Math.max(0, z);                                          // plus fin à l'avant
+    if (y > 0.5 && Math.abs(Math.abs(x) - 0.18) < 0.07) c.lerp(cTop, 0.5);   // dorsal stripes
+    return 1 - 0.07 * Math.max(0, z);                                          // narrower at the front
   }));
   const scut = ellipsoid(0.17, 0.09, 0.14, cuticle(COL.thorax));
   scut.position.set(0, 0.24, -0.36); thorax.add(scut);
-  for (const s of [-1, 1]) {           // macrochètes
+  for (const s of [-1, 1]) {           // macrochaetae
     for (const [x, z] of [[0.1, 0.1], [0.1, -0.13]]) {
       const y = 0.33 * Math.sqrt(Math.max(0, 1 - (x / 0.34) ** 2 - (z / 0.47) ** 2));
       bristle(thorax, V(s * x, y - 0.01, z), V(s * 0.1, 0.5, -1), 0.28, 0.011, dark);
@@ -223,7 +223,7 @@ export function createFly() {
     hal.rotation.y = s > 0 ? 0.4 : Math.PI - 0.4; thorax.add(hal);
   }
 
-  // tête
+  // head
   const neck = new THREE.Group(); neck.position.set(0, 0.09, 0.44); neck.rotation.order = "YXZ"; thorax.add(neck);
   neck.add(ellipsoid(0.11, 0.11, 0.1, cuticle(COL.thorax)));
   const cFrons = col(COL.frons), cHead = col(0xa87542);
@@ -265,24 +265,24 @@ export function createFly() {
   const labellum = ellipsoid(0.08, 0.05, 0.07, cuticle(0xd8b489));
   labellum.position.set(0, -0.22, 0.01); probo.add(labellum);
 
-  // abdomen en deux articulations, tergites cerclés de brun, bout noir (mâle)
+  // abdomen in two joints, tergites banded with brown, black tip (male)
   const abd1 = new THREE.Group(); abd1.position.set(0, -0.02, -0.36); abd1.rotation.order = "YXZ"; thorax.add(abd1);
   const abd2 = new THREE.Group(); abd2.position.set(0, -0.02, -0.44); abd2.rotation.order = "YXZ"; abd1.add(abd2);
   const cAbd = col(COL.abdomen), cBand = col(COL.band), cMale = col(COL.male);
   const abdMat = cuticle(0xffffff, { vertexColors: true });
   const tergites = (n, maleFrom) => (x, y, z, c) => {
-    const t = (1 - z) / 2 * n, k = Math.floor(t), f = t - k;   // t : 0 à l'avant -> n à l'arrière
+    const t = (1 - z) / 2 * n, k = Math.floor(t), f = t - k;   // t: 0 at the front -> n at the back
     const band = THREE.MathUtils.smoothstep(f, 0.6, 0.8);
     c.copy(cAbd).lerp(cBand, band * 0.9);
     if (k >= maleFrom) c.copy(cMale);
     c.lerp(cPale, THREE.MathUtils.smoothstep(-y, 0.15, 0.7) * (k >= maleFrom ? 0.25 : 0.85));
-    return 1 - 0.035 * Math.exp(-(((f < 0.5 ? f : 1 - f) / 0.06) ** 2));   // sillons
+    return 1 - 0.035 * Math.exp(-(((f < 0.5 ? f : 1 - f) / 0.06) ** 2));   // grooves
   };
   const a1 = ellipsoid(0.3, 0.27, 0.34, abdMat, tergites(3, 99)); a1.position.z = -0.26; abd1.add(a1);
   const a2 = ellipsoid(0.26, 0.24, 0.29, abdMat, tergites(3, 1)); a2.position.z = -0.16; abd2.add(a2);
   const tip = ellipsoid(0.09, 0.09, 0.07, cuticle(COL.male)); tip.position.set(0, -0.07, -0.4); abd2.add(tip);
 
-  // ailes
+  // wings
   const wingMat = new THREE.MeshPhysicalMaterial({ map: wingTexture(), transparent: true, side: THREE.DoubleSide,
     depthWrite: false, roughness: 0.18, iridescence: 1, iridescenceIOR: 1.35,
     iridescenceThicknessRange: [250, 650] });
@@ -298,8 +298,8 @@ export function createFly() {
   for (const n of ["T1", "T2", "T3"]) for (const s of [-1, 1]) legs.push(buildLeg(thorax, n, s, legMat, dark));
 
   const _f = V(0, 0, 0);
-  /* feet (optionnel) : 6 cibles de tarse en coordonnées monde, dans l'ordre de `legs`
-     (marche, saut) ; sinon les pieds restent à leur place nominale sous la mouche. */
+  /* feet (optional): 6 tarsus targets in world coordinates, in the order of `legs`
+     (walking, jump); otherwise the feet stay at their nominal place under the fly. */
   function apply(p, feet) {
     root.rotation.y = p.yaw;
     thorax.position.y = p.height;

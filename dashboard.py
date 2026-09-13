@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-dashboard - serveur local pour simuler le connectome MaleCNS depuis le navigateur.
+dashboard - local server to simulate the MaleCNS connectome from the browser.
 
     .venv/bin/python dashboard.py [--port 8765]
 
-puis ouvrir http://127.0.0.1:8765 . Aucune dépendance au-delà de numpy/pyarrow.
+then open http://127.0.0.1:8765 . No dependency beyond numpy/pyarrow.
 """
 import argparse, json, os, struct, threading, time, traceback, uuid
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -20,31 +20,32 @@ SIDES = ["L", "R", "M", ""]
 
 PRESETS = {
     "stim": [
-        ("LC4 — détection de looming", "^LC4$", "type"),
+        ("LC4 — looming detection", "^LC4$", "type"),
         ("LPLC2 — looming", "^LPLC2$", "type"),
-        ("ORN DA1 — phéromone cVA", "^ORN_DA1$", "type"),
-        ("ORN VA1v — phéromone", "^ORN_VA1v$", "type"),
-        ("Organe de Johnston C/E — son", "^JO-(C|E)", "type"),
-        ("GRN labellaires (LB)", "^LB[0-9]", "type"),
-        ("Fibre géante DNp01", "^DNp01$", "type"),
-        ("MDN — marche arrière", "^MDN$", "type"),
-        ("pIP10 — chant de cour", "^pIP10$", "type"),
-        ("DNa02 — virage", "^DNa02$", "type"),
-        ("s-LNv — horloge", "^s-LNv$", "type"),
+        ("ORN DA1 — cVA pheromone", "^ORN_DA1$", "type"),
+        ("ORN VA1v — pheromone", "^ORN_VA1v$", "type"),
+        ("Johnston's organ B — sound", "^JO-B", "type"),
+        ("Johnston's organ C/E — wind", "^JO-(C|E)", "type"),
+        ("Labellar GRNs (LB)", "^LB[0-9]", "type"),
+        ("Giant fiber DNp01", "^DNp01$", "type"),
+        ("MDN — backward walking", "^MDN$", "type"),
+        ("pIP10 — courtship song", "^pIP10$", "type"),
+        ("DNa02 — turning", "^DNa02$", "type"),
+        ("s-LNv — clock", "^s-LNv$", "type"),
     ],
     "readout": [
-        ("Fibre géante DNp01", "^DNp01$", "type"),
-        ("Neurones descendants", "^descending", "superclass"),
-        ("Motoneurones VNC", "^vnc_motor", "superclass"),
+        ("Giant fiber DNp01", "^DNp01$", "type"),
+        ("Descending neurons", "^descending", "superclass"),
+        ("VNC motor neurons", "^vnc_motor", "superclass"),
         ("MN9 — proboscis", "^MN9$", "type"),
-        ("Motoneurones cerveau", "^cb_motor", "superclass"),
-        ("Neurones de Kenyon", "^Kenyon", "class"),
+        ("Brain motor neurons", "^cb_motor", "superclass"),
+        ("Kenyon cells", "^Kenyon", "class"),
     ],
 }
 
 
 def pack(header, arrays):
-    """[u32 taille de l'en-tête][en-tête JSON][tableaux alignés sur 8 octets]."""
+    """[u32 header size][JSON header][arrays aligned on 8 bytes]."""
     specs, blobs, off = [], [], 0
     for name, a in arrays.items():
         a = np.ascontiguousarray(a)
@@ -72,7 +73,7 @@ class Jobs:
             stims.append(dict(idx=idx, hz=float(s.get("hz", 150)),
                               t_on=float(s.get("t_on", 0)),
                               t_off=float(s.get("t_off", q["t_ms"])), label=s.get("query")))
-        if not stims: raise ValueError("aucun neurone stimulé : vérifie les motifs")
+        if not stims: raise ValueError("no neuron stimulated: check the patterns")
         sil = spec.get("silence") or {}
         silence = C.find(sil.get("query", ""), sil.get("field", "any"))
         readouts = []
@@ -111,7 +112,7 @@ class Jobs:
             arrays["silenced"] = silence.astype(np.int32)
             job["result"] = pack(header, arrays)
             job["state"], job["progress"] = "done", 1.0
-            print(f"simulation {job['id']} : {header['total_spikes']:,} décharges, {wall:.1f} s")
+            print(f"simulation {job['id']}: {header['total_spikes']:,} spikes, {wall:.1f} s")
         except engine.Cancelled:
             job["state"] = "cancelled"
         except Exception as e:
@@ -132,7 +133,7 @@ def build_meta(C):
         group_sizes=np.bincount(C.group, minlength=len(engine.GROUPS)).tolist(),
     )
     arrays = dict(
-        pos=(C.pos * 0.008).astype(np.float32).ravel(),       # voxels 8 nm -> µm
+        pos=(C.pos * 0.008).astype(np.float32).ravel(),       # 8 nm voxels -> µm
         pos_est=C.pos_est.astype(np.uint8),
         group=C.group,
         nt=np.array([nt_code.get(n, len(NT_NAMES) - 2) for n in C.nt], np.uint8),
@@ -192,7 +193,7 @@ class Handler(BaseHTTPRequestHandler):
                 root = os.path.realpath(STATIC)
                 f = os.path.realpath(os.path.join(root, rel))
                 if not f.startswith(root + os.sep) or not os.path.isfile(f):
-                    return self.send(404, {"error": "introuvable"})
+                    return self.send(404, {"error": "not found"})
                 ct = {".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript",
                       ".css": "text/css", ".json": "application/json",
                       }.get(os.path.splitext(f)[1], "application/octet-stream")
@@ -208,19 +209,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, s.read(int(qs.get("since", ["0"])[0])))
             if p.startswith("/api/neuron/"):
                 i = int(p.rsplit("/", 1)[1])
-                if not 0 <= i < self.C.N: return self.send(404, {"error": "idx hors bornes"})
+                if not 0 <= i < self.C.N: return self.send(404, {"error": "idx out of range"})
                 return self.send(200, neuron_detail(self.C, i))
             if p.startswith("/api/job/"):
                 parts = p.split("/")
                 job = self.jobs.jobs.get(parts[3])
-                if job is None: return self.send(404, {"error": "job inconnu"})
+                if job is None: return self.send(404, {"error": "unknown job"})
                 if len(parts) > 4 and parts[4] == "result":
                     if job["state"] != "done": return self.send(409, {"error": job["state"]})
                     return self.send(200, job["result"], "application/octet-stream")
                 return self.send(200, dict(state=job["state"], progress=job["progress"],
                                            spikes=job["spikes"], error=job["error"],
                                            elapsed=time.time() - job["t0"]))
-            self.send(404, {"error": "introuvable"})
+            self.send(404, {"error": "not found"})
         except Exception as e:
             traceback.print_exc(); self.send(400, {"error": str(e)})
 
@@ -237,17 +238,17 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     if act == "start": return self.send(200, self.live.start(body.get("params", {})))
                     if act == "event": self.live.event(body["id"], body["key"])
-                    elif act == "audio": self.live.audio(body["id"], body.get("level", 0))
+                    elif act == "audio": self.live.audio(body["id"], body.get("level", 0), bool(body.get("hit")))
                     elif act == "stop": self.live.get(body["id"]).stop()
-                    else: return self.send(404, {"error": "introuvable"})
+                    else: return self.send(404, {"error": "not found"})
                 except (KeyError, StopIteration) as e:
-                    return self.send(409, {"error": f"session ou événement inconnu : {e}"})
+                    return self.send(409, {"error": f"unknown session or event: {e}"})
                 return self.send(200, {"ok": True})
             if p.startswith("/api/job/") and p.endswith("/cancel"):
                 job = self.jobs.jobs.get(p.split("/")[3])
                 if job: job["cancel"].set()
                 return self.send(200, {"ok": True})
-            self.send(404, {"error": "introuvable"})
+            self.send(404, {"error": "not found"})
         except Exception as e:
             self.send(400, {"error": str(e)})
 
@@ -260,6 +261,6 @@ if __name__ == "__main__":
     C = engine.Connectome()
     Handler.C, Handler.jobs, Handler.meta, Handler.live = C, Jobs(C), build_meta(C), live.Live(C)
     srv = ThreadingHTTPServer((a.host, a.port), Handler)
-    print(f"dashboard prêt : http://{a.host}:{a.port}   ·   mouche 3D : http://{a.host}:{a.port}/fly")
+    print(f"dashboard ready: http://{a.host}:{a.port}   ·   3D fly: http://{a.host}:{a.port}/fly")
     try: srv.serve_forever()
     except KeyboardInterrupt: pass

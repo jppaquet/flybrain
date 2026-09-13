@@ -15,9 +15,9 @@ on your own machine, and watch it drive a 3D fly.
   - *Brain*: a continuous simulation of the connectome drives the body through its
     descending neurons and motor neurons (legs by muscle, wings, neck, abdomen,
     proboscis). Looming → giant fiber → TTMn → jump; taste → MN9 → proboscis;
-    DNp09 → walking; DNa02 → turning…
-
-The interface is in French.
+    DNp09 → walking; DNa02 → turning; music → auditory JO-B neurons → wing motor
+    neurons → wing flicks on the beat… Above the fly, a 3D point cloud of all
+    165,384 neurons lights up as they fire.
 
 ## Requirements
 
@@ -65,14 +65,21 @@ file that is not in the repository.
 
 **Dashboard.** Pick neurons to stimulate (regex on a field, or presets such as LC4,
 ORN DA1, Johnston's organ…), set a Poisson rate and a time window, add readouts, then
-*Simuler* (⌘/Ctrl+Enter). Click any neuron (map, raster, tables) to inspect its
+*Simulate* (⌘/Ctrl+Enter). Click any neuron (map, raster, tables) to inspect its
 connections and to stimulate, read out or silence it.
 
-**3D fly — brain mode.** Choose *Cerveau (connectome)*, *Démarrer la simulation*, then
-send stimuli: sensory (looming left/right, taste, sound, cVA odour) or direct
+**3D fly — brain mode.** Choose *Brain (connectome)*, *Start simulation*, then
+send stimuli: sensory (looming left/right, taste, sound, wind, cVA odour) or direct
 “optogenetic” activation of a descending neuron (giant fiber, DNp09, MDN, DNa02, pIP10,
-MN9). The panel shows the live rates of the 64 motor channels, including a legs × muscles
-grid. Tick *Le son stimule l'organe de Johnston* to feed the audio source to the brain.
+MN9). The panel shows the live rates of the motor channels, including a legs × muscles
+grid. Tick *The sound drives Johnston's organ* and play music: the auditory neurons of
+Johnston's organ (JO-B) receive a background drive that follows the volume, plus a short
+burst on every kick drum, and the fly flicks its wings on the beat.
+
+The brain floating above the fly shows every neuron at its soma position, in the fly's
+own orientation (brain over the head, ventral nerve cord over the thorax), coloured by
+anatomical group. A neuron flashes white when it fires, and the neurons driven by a
+stimulus glow amber. Untick *Show the brain in 3D above the fly* to hide it.
 
 **Command line.** `flysim.py` runs the same model without the browser:
 
@@ -91,7 +98,11 @@ grid. Tick *Le son stimule l'organe de Johnston* to feed the audio source to the
 - MaleCNS has ~1.6× more synapses per neuron than FlyWire, on which that model was
   tuned: at full weight, activity explodes and never stops. Brain mode therefore
   scales weights by 0.5.
-- Even so, some stimuli (sound, taste) push the network into a self-sustained state,
+- Sound follows the real auditory route (JO-A/B hear vibrations, JO-C/E sense wind and
+  gravity). In this connectome JO-B reaches the giant fiber, the escape descending
+  neurons DNp02/06/11 and the wing motor neurons, but no path reaches the walking
+  descending neurons: music makes the fly move its wings and antennae, not walk.
+- Even so, some stimuli (wind, taste) push the network into a self-sustained state,
   mostly in the central complex. A safeguard resets the network 1 s after the last
   stimulus if activity persists, and logs it. Short-term synaptic depression is
   available as an option: it prevents that state but also silences the pathways that
@@ -107,11 +118,11 @@ grid. Tick *Le son stimule l'organe de Johnston* to feed the audio source to the
 | `setup.sh`, `run.sh` | installation and start scripts |
 | `convert.py` | MaleCNS feather files → `malecns_graph.npz` + `neurons.csv` |
 | `engine.py` | connectome loading, LIF simulation (`Stepper`, `simulate`) |
-| `live.py` | continuous simulation and motor channels for the 3D fly |
+| `live.py` | continuous simulation, motor channels and spikes for the 3D fly |
 | `dashboard.py` | local HTTP server (standard library) and JSON/binary API |
 | `flysim.py` | command-line simulator |
 | `static/` | dashboard (`index.html`, `app.js`, `results.js`, `charts.js`) |
-| `static/fly.html`, `static/fly/` | 3D fly: model, audio analysis, dance, brain link |
+| `static/fly.html`, `static/fly/` | 3D fly: model, audio analysis, dance, brain link, 3D brain |
 | `static/vendor/three/` | three.js 0.185.1, vendored (see `VERSION`) |
 
 ## Troubleshooting

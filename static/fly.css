@@ -1,5 +1,5 @@
-/* Page « Mouche 3D » : la scène est volontairement sombre (piste de danse),
-   le panneau suit le thème via les jetons de style.css. */
+/* "3D fly" page: the scene is deliberately dark (dance floor),
+   the panel follows the theme through the tokens of style.css. */
 .fly-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: calc(100vh - 53px); }
 .stage { position: relative; background: #0b0b0d; overflow: hidden; min-height: 320px; }
 .stage canvas#gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }

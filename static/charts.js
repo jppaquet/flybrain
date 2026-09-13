@@ -1,4 +1,4 @@
-/* charts.js - composants canvas du dashboard (sans dépendance). */
+/* charts.js - canvas components of the dashboard (no dependency). */
 const Charts = (() => {
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const SLOTS = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7", "--other"];
@@ -41,9 +41,9 @@ const Charts = (() => {
     const a = Math.abs(v);
     if (a >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, "") + " M";
     if (a >= 1e4) return (v / 1e3).toFixed(0) + " k";
-    if (a >= 1000) return Math.round(v).toLocaleString("fr-FR");
+    if (a >= 1000) return Math.round(v).toLocaleString("en-US");
     if (a >= 100 || Number.isInteger(v)) return String(Math.round(v));
-    return v.toFixed(d).replace(".", ",");
+    return v.toFixed(d);
   }
 
   /* ---------------------------------------------------------------- tooltip */
@@ -71,7 +71,7 @@ const Charts = (() => {
   }
 
   /* ---------------------------------------------------------- small multiples
-     panels: [{label, sub, color, values}] ; une échelle y par panneau.       */
+     panels: [{label, sub, color, values}]; one y scale per panel.            */
   class Multiples {
     constructor(canvas, opts = {}) {
       this.c = canvas; this.opts = opts; this.data = null; this.cur = null; this.hover = null;
@@ -175,7 +175,7 @@ const Charts = (() => {
         }
       }
       ctx.putImageData(img, X0, Y0);
-      // blocs (stimulés / readouts / groupes) dans la gouttière
+      // blocks (stimulated / readouts / groups) in the gutter
       ctx.font = "11.5px system-ui, sans-serif"; ctx.textBaseline = "middle";
       let start = 0;
       for (let r = 1; r <= n; r++) {
@@ -246,7 +246,7 @@ const Charts = (() => {
         this.py[i] = Math.round((oy + (P[i * 3 + b] - minb) * s) * dpr);
       }
       this.scale = s; this.span = [maxa - mina, maxb - minb];
-      // grille spatiale pour le survol (cellules de 8 px css)
+      // spatial grid for hovering (8 css px cells)
       const cs = 8 * dpr; this.cs = cs; this.gw = Math.ceil(w * dpr / cs) + 1;
       const cells = new Map();
       for (let i = 0; i < N; i++) {
@@ -295,7 +295,7 @@ const Charts = (() => {
         ctx.lineWidth = 4; ctx.strokeStyle = css("--surface"); ctx.stroke();
         ctx.lineWidth = 2; ctx.strokeStyle = css("--ink"); ctx.stroke();
       }
-      // barre d'échelle 100 µm
+      // 100 µm scale bar
       const bar = 100 * this.scale;
       ctx.fillStyle = css("--ink-2"); ctx.fillRect(w - 16 - bar, h - 14, bar, 2);
       ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "right"; ctx.textBaseline = "bottom";
@@ -316,7 +316,7 @@ const Charts = (() => {
           if (this.value && this.value[n] > 0 && dd < bda) { bda = dd; bestAct = n; }
         }
       }
-      return bestAct >= 0 ? bestAct : best;   // préfère un neurone actif
+      return bestAct >= 0 ? bestAct : best;   // prefer an active neuron
     }
     onMove(e) {
       const i = this.nearest(e);

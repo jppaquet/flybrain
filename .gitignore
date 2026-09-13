@@ -1,11 +1,11 @@
-# Données du connectome MaleCNS (téléchargées par setup.sh, ~1,2 Go) et fichiers dérivés
+# MaleCNS connectome data (downloaded by setup.sh, ~1.2 GB) and derived files
 *.feather
 malecns_graph.npz
 neurons.csv
 meta_cache.npz
 last_run.npz
 
-# Environnement Python
+# Python environment
 .venv/
 venv/
 env/
@@ -16,24 +16,24 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
-# Secrets et configuration locale
+# Secrets and local configuration
 .env
 .env.*
 *.local.json
 
-# Réglages locaux de Claude Code
+# Local Claude Code settings
 .claude/settings.local.json
 
-# Éditeurs
+# Editors
 .vscode/
 .idea/
 *.swp
 *~
 
-# Journaux
+# Logs
 *.log
 
-# Système
+# System
 .DS_Store
 ._*
 Thumbs.db

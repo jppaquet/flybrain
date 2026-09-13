@@ -1,12 +1,12 @@
-/* audio.js - sources (fichier, micro, beat de démo) et analyse temps réel :
-   niveau, détection de silence, attaques (flux spectral), tempo (autocorrélation)
-   et phase du temps (boucle à verrouillage de phase sur les coups de grosse caisse). */
+/* audio.js - sources (file, microphone, demo beat) and real-time analysis:
+   level, silence detection, onsets (spectral flux), tempo (autocorrelation)
+   and beat phase (phase-locked loop on the kick drum hits). */
 
 export class AudioEngine {
   constructor() {
     this.ctx = null; this.mode = "none";
-    this.threshold = -50;          // dBFS : en dessous, c'est le silence
-    this.hold = 0.35;              // s de silence avant l'arrêt
+    this.threshold = -50;          // dBFS: below this, it is silence
+    this.hold = 0.35;              // s of silence before stopping
     this.phase = 0; this.bpm = 0; this.conf = 0; this.beat = 0;
     this.active = false; this.lastLoud = -1e9; this.level = 0; this.db = -100;
     this.flux = []; this.hist = []; this.onsets = []; this.lastOnset = -1; this.lastTempo = 0; this.prevT = null;
@@ -15,8 +15,8 @@ export class AudioEngine {
   ensure() {
     if (!this.ctx) {
       const ctx = this.ctx = new AudioContext();
-      // toutes les sources entrent par `input` : un analyseur court (attaques, 43 ms)
-      // et un long pour le niveau (170 ms, robuste aux creux entre deux coups)
+      // every source enters through `input`: a short analyser (onsets, 43 ms)
+      // and a long one for the level (170 ms, robust to the dips between two hits)
       this.input = ctx.createGain();
       this.an = ctx.createAnalyser(); this.an.fftSize = 2048; this.an.smoothingTimeConstant = 0;
       this.anL = ctx.createAnalyser(); this.anL.fftSize = 8192;
@@ -55,7 +55,7 @@ export class AudioEngine {
     this.micStream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
     this.micNode = ctx.createMediaStreamSource(this.micStream);
-    this.micNode.connect(this.input);              // pas vers les haut-parleurs (larsen)
+    this.micNode.connect(this.input);              // not to the speakers (feedback)
     this.mode = "mic"; this.bpm = 0;
   }
 
@@ -69,7 +69,7 @@ export class AudioEngine {
   stop() { this.detach(); }
   setVolume(v) { this.ensure(); this.out.gain.value = v; }
 
-  /* À appeler à chaque image. */
+  /* Call on every frame. */
   update() {
     if (!this.ctx) return { t: 0, dt: 0, db: -100, level: 0, active: false, phase: this.phase, bpm: 0,
                             conf: 0, onset: false, kick: false, beat: false, downbeat: false, mode: "none" };
@@ -92,13 +92,13 @@ export class AudioEngine {
     }
     this.db = db;
 
-    // silence : seuil avec hystérésis de 3 dB et temps de maintien
+    // silence: threshold with 3 dB hysteresis and a hold time
     if (db > this.threshold + (this.active ? 0 : 3)) this.lastLoud = t;
     this.active = t - this.lastLoud < this.hold;
     const lv = Math.min(1, Math.max(0, (db - this.threshold) / 30));
     this.level += (lv - this.level) * Math.min(1, dt * 8);
 
-    // attaques : pic local du flux au-dessus de 1,5 x sa moyenne récente
+    // onsets: local peak of the flux above 1.5 x its recent mean
     const F = this.flux; F.push([t, flux, bass]);
     while (F.length && F[0][0] < t - 8) F.shift();
     let onset = false, kick = false;
@@ -118,7 +118,7 @@ export class AudioEngine {
 
     if (t - this.lastTempo > 0.5 && n > 30 && F[n - 1][0] - F[0][0] > 3) { this.lastTempo = t; this.tempo(); }
 
-    // phase du temps : avance au tempo, recalée sur les coups de grosse caisse
+    // beat phase: advances at the tempo, realigned on the kick drum hits
     const bpm = this.bpm || 110;
     this.phase += dt * bpm / 60;
     if (kick) {
@@ -167,8 +167,8 @@ export class AudioEngine {
   }
 }
 
-/* Beat de démo synthétisé (dembow ~98 BPM). Une mesure sur huit est silencieuse,
-   pour voir la mouche s'arrêter puis repartir. */
+/* Synthesised demo beat (dembow ~98 BPM). One bar in eight is silent,
+   to see the fly stop and start again. */
 export class DemoBeat {
   constructor(ctx, { bpm = 98, breaks = true } = {}) {
     this.ctx = ctx; this.bpm = bpm; this.breaks = breaks;

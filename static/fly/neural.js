@@ -1,28 +1,28 @@
-/* neural.js - la mouche pilotée par la simulation du connectome (/api/live).
+/* neural.js - the fly driven by the connectome simulation (/api/live).
 
-   Ce qui vient du connectome : les taux des neurones descendants et des motoneurones,
-   lus toutes les 10 ms de temps simulé.
-   Ce qui est procédural (choisi à la main, comme chez Eon) : la traduction de ces
-   taux en angles, la marche en trépied (le LIF n'a pas de générateur de rythme)
-   et la trajectoire du saut. */
+   What comes from the connectome: the rates of the descending neurons and of the motor
+   neurons, read every 10 ms of simulated time, and the neurons that fired (3D brain).
+   What is procedural (hand-chosen, as in Eon's work): turning those rates into angles,
+   the tripod gait (the LIF has no rhythm generator) and the jump trajectory. */
 import * as THREE from "three";
 
-const act = (r, ref) => 1 - Math.exp(-Math.max(0, r) / ref);    // taux (Hz) -> activation 0..1
+const act = (r, ref) => 1 - Math.exp(-Math.max(0, r) / ref);    // rate (Hz) -> activation 0..1
 const frac = x => x - Math.floor(x);
 const clamp01 = x => Math.min(1, Math.max(0, x));
+const b64i32 = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new Int32Array(u.buffer); };
 
-/* ------------------------------------------------------------ flux de trames */
+/* ------------------------------------------------------------ frame stream */
 export class BrainLink {
   constructor() { this.reset(); }
   reset() {
     this.id = null; this.info = null; this.frames = []; this.next = 0; this.tPlay = null;
-    this.S = {}; this.raw = {}; this.cur = null; this.status = null; this.error = null;
+    this.S = {}; this.raw = {}; this.cur = null; this.status = null; this.error = null; this.spikes = [];
   }
   async start(params) {
     this.stop();
     const r = await fetch("/api/live/start", { method: "POST", body: JSON.stringify({ params }) });
     const info = await r.json();
-    if (!r.ok) throw new Error(info.error || "démarrage impossible");
+    if (!r.ok) throw new Error(info.error || "cannot start");
     this.reset(); this.info = info; this.id = info.id;
     this.keys = info.channels.map(c => c.key);
     this.poll(info.id);
@@ -46,21 +46,29 @@ export class BrainLink {
     this.id = null;
   }
   event(key) { if (this.id != null) fetch("/api/live/event", { method: "POST", body: JSON.stringify({ id: this.id, key }) }); }
-  audio(level) { if (this.id != null) fetch("/api/live/audio", { method: "POST", body: JSON.stringify({ id: this.id, level }) }); }
+  audio(level, hit = false) { if (this.id != null) fetch("/api/live/audio", { method: "POST", body: JSON.stringify({ id: this.id, level, hit }) }); }
 
-  /* Avance l'horloge de lecture au rythme du temps simulé et consomme les trames.
-     Les taux sont lissés (constante 30 ms) ; `raw` garde la dernière trame brute. */
+  /* Neurons driven by the current inputs (frame names -> indices from the start info). */
+  inputIdx(names) {
+    return names.map(n => n.startsWith("ev:") ? this.info.events.find(e => e.key === n.slice(3))?.idx
+                         : n.startsWith("audio") ? this.info.audio_idx : null).filter(Boolean);
+  }
+
+  /* Advances the playback clock at the pace of simulated time and consumes the frames.
+     Rates are smoothed (30 ms constant); `raw` keeps the last raw frame; `spikes`
+     collects the neurons that fired (brain frames), emptied by the caller. */
   consume(dt) {
     const F = this.frames;
     if (!F.length) return false;
     const latest = F[F.length - 1][0];
     if (this.tPlay == null) this.tPlay = F[0][0] - 10;
     this.tPlay = Math.min(this.tPlay + dt * 1000, latest - 10);
-    if (latest - this.tPlay > 400) this.tPlay = latest - 60;           // trop en retard : on saute
+    if (latest - this.tPlay > 400) this.tPlay = latest - 60;           // too far behind: skip ahead
     let n = 0;
     while (F.length && F[0][0] <= this.tPlay) {
       const f = F.shift(); this.cur = f; n++;
       if (f[5] && this.onNote) this.onNote(f[5]);
+      if (f[6]) this.spikes.push(b64i32(f[6]));
       const k = 1 - Math.exp(-10 / 30);
       f[1].forEach((r, i) => {
         const key = this.keys[i];
@@ -72,8 +80,8 @@ export class BrainLink {
   }
 }
 
-/* ------------------------------------------------------------ corps */
-const TRIPOD_A = new Set([1, 2, 5]);     // ordre de fly.legs : T1D, T1G, T2D, T2G, T3D, T3G -> G1, D2, G3
+/* ------------------------------------------------------------ body */
+const TRIPOD_A = new Set([1, 2, 5]);     // order of fly.legs: T1R, T1L, T2R, T2L, T3R, T3L -> L1, R2, L3
 const VMAX = 8, WMAX = 2.6;              // mm/s, rad/s
 
 export class BodyController {
@@ -100,15 +108,15 @@ export class BodyController {
     const p = { ...base };
     const root = this.fly.root;
 
-    // --- saut : une décharge de TTMn (motoneurone du muscle de saut, en aval de la
-    //     fibre géante) suffit, comme chez la vraie mouche
+    // --- jump: one spike of TTMn (motor neuron of the jump muscle, downstream of the
+    //     giant fiber) is enough, as in the real fly
     if (!this.jump && this.t - this.lastJump > 1.2 && (raw.ttmn || 0) > 0) {
       this.jump = { t: 0, vx: Math.sin(this.yaw), vz: Math.cos(this.yaw) };
       this.lastJump = this.t;
-      this.note(`Saut : TTMn a déchargé (fibre géante à ${Math.round(S.gf || 0)} Hz)`);
+      this.note(`Jump: TTMn fired (giant fiber at ${Math.round(S.gf || 0)} Hz)`);
     }
 
-    // --- locomotion : DNp09 (avant), MDN (arrière), DNa01/02 (virage ipsilatéral)
+    // --- locomotion: DNp09 (forward), MDN (backward), DNa01/02 (ipsilateral turn)
     const vT = VMAX * a("fwd", 40) - 0.6 * VMAX * a("back", 40);
     const wT = WMAX * (a("turnL", 40) - a("turnR", 40));
     const kk = 1 - Math.exp(-dt / 0.15);
@@ -125,7 +133,7 @@ export class BodyController {
       const u = Math.min(1, j.t / T), h = 4 * 2.2 * u * (1 - u);
       this.pos.x += j.vx * 3 * dt; this.pos.z += j.vz * 3 * dt;
       root.position.set(this.pos.x, h, this.pos.z);
-      p.height += j.t < 0.08 ? 0.12 : 0;                    // extension des pattes médianes
+      p.height += j.t < 0.08 ? 0.12 : 0;                    // middle legs extend
       p.wingSpreadL = p.wingSpreadR = 1;
       const flap = 0.55 * Math.sin(2 * Math.PI * 28 * this.t);
       p.wingElevL += flap; p.wingElevR += flap;
@@ -141,7 +149,7 @@ export class BodyController {
       feet = this.gait(dt, base.stance);
     }
 
-    // --- motoneurones des pattes : décalages ajoutés aux cibles de tarse
+    // --- leg motor neurons: offsets added to the tarsus targets
     if (!this.jump) {
       let push = 0;
       const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
@@ -156,24 +164,25 @@ export class BodyController {
       p.height += 0.05 * push / feet.length;
     }
 
-    // --- autres motoneurones
+    // --- other motor neurons
     p.proboscis = Math.max(p.proboscis, clamp01(act(g("mn9"), 50) + 0.3 * a("pm", 40)));
+    // wing steering: 20-30 Hz on every hit of sound (JO-B -> DNp02/06 -> MN); spread + raise
     for (const side of ["L", "R"]) {
-      const steer = a("wstr" + side), power = a("wpow" + side);
+      const steer = a("wstr" + side, 20), power = a("wpow" + side);
       const vib = 0.14 * steer * Math.sin(2 * Math.PI * 17 * this.t) + 0.5 * power * Math.sin(2 * Math.PI * 26 * this.t);
       p["wingSpread" + side] = Math.max(p["wingSpread" + side], 0.85 * steer, 0.95 * power);
-      p["wingElev" + side] += vib;
+      p["wingElev" + side] += vib + 0.25 * steer;
     }
     p.headYaw += 0.45 * (a("neckL") - a("neckR"));
     p.headPitch -= 0.15 * (a("neckL") + a("neckR")) / 2;
-    p.antenna += 0.35 * (a("antL") + a("antR")) / 2;
+    p.antenna += 0.35 * (a("antL", 12) + a("antR", 12)) / 2;
     p.abdPitch -= 0.35 * (a("abdL") + a("abdR")) / 2;
     p.abdYaw += 0.3 * (a("abdL") - a("abdR"));
     return { pose: p, feet };
   }
 
-  /* Marche en trépied : pieds fixes au sol en appui, arc de transfert vers la
-     position nominale anticipée pendant le balancement. */
+  /* Tripod gait: feet fixed on the ground in stance, swing arc toward the anticipated
+     nominal position. */
   gait(dt, stance) {
     const legs = this.fly.legs;
     const speed = Math.abs(this.v) / VMAX + Math.abs(this.w) / WMAX;
@@ -183,7 +192,7 @@ export class BodyController {
     const stepping = speed > 0.03 || disp > 0.12 || this.swing.some(Boolean);
     const freq = 3 + 9 * Math.min(1, speed);
     if (stepping) this.phase += dt * freq;
-    const Ts = 0.5 / freq;                                   // durée d'appui
+    const Ts = 0.5 / freq;                                   // stance duration
     const yawP = this.yaw + this.w * Ts / 2;
     const posP = this.pos.clone().add(new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)).multiplyScalar(this.v * Ts / 2));
     return legs.map((_, k) => {

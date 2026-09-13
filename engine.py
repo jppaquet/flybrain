@@ -1,26 +1,25 @@
 """
-engine - chargement du connectome MaleCNS et simulation LIF paramétrable.
+engine - loading of the MaleCNS connectome and configurable LIF simulation.
 
-Deux modèles :
+Two models:
   - "shiu"   : Shiu et al., Nature 2024. dv/dt = (g - v)/tau_m, dg/dt = -g/tau_syn,
-               une décharge présynaptique ajoute w à g après un délai (1.8 ms).
-               Stimulation = entrée de Poisson de poids f_poi * w_syn sur v.
-  - "simple" : le modèle de flysim.py (courant instantané, pas de délai,
-               tau_m = 5 ms, décharges forcées pour la stimulation).
-Le potentiel v est exprimé en mV au-dessus du repos (seuil 7 mV = -45 mV pour un
-repos à -52 mV).
+               a presynaptic spike adds w to g after a delay (1.8 ms).
+               Stimulation = Poisson input of weight f_poi * w_syn on v.
+  - "simple" : the flysim.py model (instantaneous current, no delay,
+               tau_m = 5 ms, forced spikes for stimulation).
+The potential v is in mV above rest (threshold 7 mV = -45 mV for a rest at -52 mV).
 """
 import os, re, time
 import numpy as np
-import pyarrow.ipc as ipc        # Feather v2 = format de fichier IPC d'Arrow
+import pyarrow.ipc as ipc        # Feather v2 = Arrow's IPC file format
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ANN_FILE = "body-annotations-male-cns-v1.0-minconf-0.5.feather"
 CACHE = "meta_cache.npz"
 
-# Regroupement des 22 superclasses en 7 groupes anatomiques (+ "autre").
-GROUPS = ["Sensoriel", "Lobe optique", "Cerveau central", "Descendant",
-          "Ascendant", "VNC", "Moteur / efférent", "Autre"]
+# The 22 superclasses grouped into 7 anatomical groups (+ "other").
+GROUPS = ["Sensory", "Optic lobe", "Central brain", "Descending",
+          "Ascending", "VNC", "Motor / efferent", "Other"]
 
 def group_of(superclass):
     s = superclass or ""
@@ -47,19 +46,19 @@ class Connectome:
         g = np.load(os.path.join(d, "malecns_graph.npz"))
         self.indptr = g["indptr"]
         self.indices = g["indices"]
-        self.nsyn = g["weight"].astype(np.float32)          # nb de synapses
+        self.nsyn = g["weight"].astype(np.float32)          # number of synapses
         self.sign = g["sign"].astype(np.float32)
         self.body = g["body"]
         self.N = len(self.indptr) - 1
         self.pre = np.repeat(np.arange(self.N, dtype=np.int32), np.diff(self.indptr))
-        self.signed = self.nsyn * self.sign[self.pre]      # synapses x signe
+        self.signed = self.nsyn * self.sign[self.pre]      # synapses x sign
         self._csc = None
         self._load_meta(d)
         self.body_to_idx = {int(b): i for i, b in enumerate(self.body)}
-        print(f"connectome chargé en {time.time() - t0:.1f} s "
-              f"({self.N:,} neurones, {len(self.indices):,} connexions)")
+        print(f"connectome loaded in {time.time() - t0:.1f} s "
+              f"({self.N:,} neurons, {len(self.indices):,} connections)")
 
-    # ------------------------------------------------------------ métadonnées
+    # ------------------------------------------------------------ metadata
     def _load_meta(self, d):
         cols = ["bodyId", "type", "instance", "superclass", "class", "subclass",
                 "somaSide", "rootSide", "somaLocation"]
@@ -95,8 +94,8 @@ class Connectome:
         np.savez(cache, pos=self.pos, pos_est=self.pos_est)
 
     def _estimate_positions(self, pos, known):
-        """Neurones sans soma (sensoriels surtout) : barycentre pondéré des
-        partenaires positionnés, itéré pour propager aux voisins de voisins."""
+        """Neurons without a soma (mostly sensory): weighted centroid of their positioned
+        partners, iterated to spread to neighbours of neighbours."""
         pre, post, w = self.pre, self.indices, self.nsyn
         for _ in range(4):
             kpre, kpost = known[pre], known[post]
@@ -113,10 +112,10 @@ class Connectome:
         pos[~known] = pos[known].mean(0)
         return pos
 
-    # --------------------------------------------------------------- requêtes
+    # --------------------------------------------------------------- queries
     def find(self, query, field="any"):
-        """Indices des neurones qui matchent. field : any|type|instance|
-        superclass|class|body|idx (body/idx : liste séparée par virgules)."""
+        """Indices of the matching neurons. field: any|type|instance|
+        superclass|class|body|idx (body/idx: comma-separated list)."""
         q = (query or "").strip()
         if not q: return np.zeros(0, np.int32)
         if field in ("body", "idx"):
@@ -132,7 +131,7 @@ class Connectome:
         return np.array(out, dtype=np.int32)
 
     def csc(self):
-        """Index des entrées (pour les partenaires présynaptiques)."""
+        """Input index (for presynaptic partners)."""
         if self._csc is None:
             order = np.argsort(self.indices, kind="stable")
             ptr = np.zeros(self.N + 1, dtype=np.int64)
@@ -156,17 +155,17 @@ def resolve_params(p):
     q["trials"] = int(min(max(int(p.get("trials", 1)), 1), 10))
     q["seed"] = int(p.get("seed", 0))
     q["w_scale"] = float(p.get("w_scale", 1.0))
-    # dépression synaptique à court terme (0 = désactivée, comme Shiu et al.)
+    # short-term synaptic depression (0 = off, as in Shiu et al.)
     q["std_u"] = min(max(float(p.get("std_u") or 0), 0.0), 0.9)
     q["std_tau"] = min(max(float(p.get("std_tau") or 300), 10.0), 5000.0)
-    # simulation continue : remise au repos si l'activité persiste sans stimulus (0 = jamais)
+    # continuous simulation: reset to rest if activity persists without a stimulus (0 = never)
     q["quench_ms"] = max(float(p.get("quench_ms") or 0), 0.0)
     q["dt"] = min(max(q["dt"], 0.05), 1.0)
     return q
 
 
 class Stepper:
-    """État LIF persistant, avancé par tranches (utilisé par simulate et par live)."""
+    """Persistent LIF state, advanced in slices (used by simulate and by live)."""
     def __init__(self, C, q, silence=None, seed=0):
         self.C, self.q, N, dt = C, q, C.N, q["dt"]
         self.shiu = q["model"] == "shiu"
@@ -180,8 +179,8 @@ class Stepper:
         self.th = np.float32(q["v_th"])
         self.alive = np.ones(N, dtype=bool)
         if silence is not None and len(silence): self.alive[silence] = False
-        # ressources présynaptiques : chaque décharge en consomme une fraction U,
-        # récupérées avec la constante std_tau
+        # presynaptic resources: each spike uses a fraction U of them,
+        # recovered with the time constant std_tau
         self.U = q.get("std_u", 0.0)
         self.krec = np.float32(dt / q.get("std_tau", 300.0))
         self.res = np.ones(N, np.float32) if self.U > 0 else None
@@ -196,15 +195,15 @@ class Stepper:
     def t_ms(self): return self.s * self.q["dt"]
 
     def quench(self):
-        """Remet le réseau au repos sans remettre l'horloge à zéro."""
+        """Resets the network to rest without resetting the clock."""
         self.v[:] = 0; self.g[:] = 0; self.until[:] = 0
         if self.buf is not None: self.buf[:] = 0
         self.pending = None
         if self.res is not None: self.res[:] = 1
 
     def step(self, n, drive=(), record=None):
-        """Avance de n pas. drive : [(idx, hz)] entrées de Poisson. Retourne les
-        indices des neurones ayant déchargé ; record reçoit des (pas, indices)."""
+        """Advances n steps. drive: [(idx, hz)] Poisson inputs. Returns the indices of
+        the neurons that fired; record receives (step, indices) pairs."""
         C, N, D, shiu = self.C, self.C.N, self.D, self.shiu
         v, g, until, buf, alive, rng = self.v, self.g, self.until, self.buf, self.alive, self.rng
         drive = [(idx[alive[idx]], hz * self.q["dt"] / 1000.0) for idx, hz in drive if len(idx)]
@@ -218,7 +217,7 @@ class Stepper:
                 g *= self.dg
                 if inp is not None: g += inp
                 v += (g - v) * self.kv
-                for h in hits: v[h] += self.kick          # PoissonInput sur v (Shiu)
+                for h in hits: v[h] += self.kick          # PoissonInput on v (Shiu)
             else:
                 v *= self.dm
                 if inp is not None: v += inp
@@ -252,8 +251,8 @@ class Stepper:
 
 
 def simulate(C, stims, q, silence=None, progress=None, cancel=None):
-    """stims : liste de dict(idx, hz, t_on, t_off). Retourne (steps, idx) de
-    toutes les décharges, un tableau par essai."""
+    """stims: list of dict(idx, hz, t_on, t_off). Returns (steps, idx) of every spike,
+    one array pair per trial."""
     dt = q["dt"]
     steps = int(round(q["t_ms"] / dt))
     sched = [(s["idx"], s["hz"], int(s["t_on"] / dt), int(s["t_off"] / dt)) for s in stims]
@@ -281,13 +280,13 @@ def nice_bin(x):
 
 
 def summarize(C, runs, q, stim_idx, readouts, raster_rows=1200, raster_cap=600_000):
-    """Agrège les décharges : taux par neurone, taux de population par groupe
-    et par readout, images pour la carte du cerveau, raster d'un essai."""
+    """Aggregates the spikes: rate per neuron, population rates per group and per readout,
+    frames for the brain map, raster of one trial."""
     N, dt, T, K = C.N, q["dt"], q["t_ms"], q["trials"]
     steps = int(round(T / dt))
     bin_ms = nice_bin(T / 100)
     nb = int(np.ceil(T / bin_ms))
-    spb = bin_ms / dt                                   # pas par bin
+    spb = bin_ms / dt                                   # steps per bin
     allt = np.concatenate([r[0] for r in runs]); alli = np.concatenate([r[1] for r in runs])
     nspk = np.bincount(alli, minlength=N)
     bins = np.minimum((allt / spb).astype(np.int32), nb - 1)
@@ -307,7 +306,7 @@ def summarize(C, runs, q, stim_idx, readouts, raster_rows=1200, raster_cap=600_0
     frames = np.bincount(rank[alli] * nb + bins, minlength=len(active) * nb)
     frames = np.minimum(frames, 255).astype(np.uint8)
 
-    # raster (essai 0) : stimulés, readouts, puis les plus actifs
+    # raster (trial 0): stimulated, readouts, then the most active
     t0, i0 = runs[0]
     stimset = np.zeros(N, bool); stimset[stim_idx] = True
     first = np.full(N, np.inf); np.minimum.at(first, i0, t0.astype(np.float64))
