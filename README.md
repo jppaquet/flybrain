@@ -116,6 +116,116 @@ tips the network into its self-sustained state.
 .venv/bin/python flysim.py run --stim '^LC4$' --readout '^DNp01$' --ms 300
 ```
 
+## Modes and options
+
+### The four modes of the 3D fly
+
+| Mode | Through the connectome? | Input | What moves the body |
+|---|---|---|---|
+| **Dance** | No | sound (demo beat, file, microphone) | a hand-written twerk locked to the beat |
+| **Brain** | Yes | stimulus buttons, and optionally the sound (→ JO-B) | the rates of descending and motor neurons read from the simulation |
+| **Keyboard** | Yes, partly circular | arrow keys / WASD, Space | the driven descending neurons themselves, plus the motor neurons they recruit |
+| **Switches** | Yes | keys 1–9, 0 | the front-leg motor neurons recruited by DNg12_e (not the neuron that is driven) |
+
+In the three connectome modes the neurons decide whether the fly walks, turns, jumps or
+reaches, and how strongly; the tripod gait, the jump trajectory and the path of the leg
+toward a switch are hand-written. The 3D brain shows the live spikes in all three.
+
+### 3D fly — controls in every mode
+
+| Control | Default | Effect |
+|---|---|---|
+| *Rear ¾ / Side / Front / Top*, ↻ | Rear ¾ | camera presets and auto-rotate; drag to orbit, scroll to zoom |
+| *▶ Demo beat / ♫ File… / 🎤 Mic / ■ Stop* | no source | audio source; an audio file can also be dropped on the 3D view |
+| *Demo: one silent bar in 8* | on | the demo beat goes silent one bar in eight, to see the fly stop |
+| *Volume* | 80 % | playback volume |
+| *Silence threshold* | −50 dB | below it, the sound counts as silence |
+| *Stop after* | 350 ms | how long the silence must last before the fly stops |
+| *Body* sliders, *Reset* | rest pose | height, pitch, roll, heading, leg spread, head yaw and pitch, abdomen lift and side, each wing, proboscis, antennae; every mode adds its movement to this pose |
+| Browser console | | `fly.pose`, `fly.set("abdPitch", 0.4)` |
+
+### Dance
+
+| Control | Default | Effect |
+|---|---|---|
+| *Twerk when there is sound* | on | off: the fly listens but stays still |
+| *Intensity* | 100 % (0–150 %) | amplitude of the dance |
+| *Cadence* | Auto | hits per beat: 1 or 2, or auto (1 above 135 BPM, otherwise 2) |
+| *Courtship song* | on | on every downbeat, one wing extends and vibrates, alternating sides |
+
+### Brain, Keyboard and Switches — the live simulation
+
+| Control | Default | Effect |
+|---|---|---|
+| *Start simulation / Stop* | | Keyboard and Switches start it by themselves |
+| *Reset network* | | restarts from a network at rest, same parameters |
+| *Recenter* | | brings the fly back to the centre |
+| *Weight scale* | 0.5 | multiplies every synaptic weight; at 1 the activity runs away |
+| *dt (ms)* | 0.2 | simulation time step |
+| *Depression U* | 0 | short-term synaptic depression (0 = off): prevents the runaway state but cuts the pathways that need fast firing |
+| *Recovery τ (ms)* | 200 | recovery time of that depression |
+| *Safeguard* | on | resets the network if activity persists 1 s after the last stimulus |
+| *Show the brain in 3D above the fly* | on | the point cloud of all 165,384 neurons |
+| *The sound drives Johnston's organ* | off | background drive on JO-B that follows the volume, plus a burst on every kick drum |
+
+Stimulus buttons (Brain mode):
+
+| Button | Neurons driven | Drive |
+|---|---|---|
+| *Looming, left / right / both eyes* | LC4 | 150 Hz for 300 ms |
+| *Taste (LB3c + taste pegs)* | gustatory receptor neurons that reach MN9 | 150 Hz for 800 ms |
+| *Sound (JO-B)* | auditory neurons of Johnston's organ | 200 Hz for 500 ms |
+| *Wind (JO-C/E)* | wind and gravity neurons of Johnston's organ | 150 Hz for 500 ms |
+| *cVA odour (ORN DA1)* | pheromone olfactory receptor neurons | 150 Hz for 800 ms |
+| *Giant fiber* | DNp01 | 200 Hz for 100 ms |
+| *DNp09: walk*, *MDN: walk backward* | DNp09, MDN | 150 Hz for 1.5 s |
+| *DNa02 left / right* | DNa01/02 on one side | 150 Hz for 1 s |
+| *pIP10: song* | pIP10 | 150 Hz for 1.5 s |
+| *MN9: proboscis* | MN9 | 150 Hz for 800 ms |
+
+The *Motor readout* shows the live rates of the hearing, locomotion, jump, proboscis,
+wing, head and abdomen channels, and a legs × muscles grid (8 muscle groups × 6 legs).
+
+### Keyboard
+
+| Key | Neurons driven | Rate | Effect |
+|---|---|---|---|
+| ↑ or W | DNp09 | 25 Hz | walk forward |
+| ↓ or S | MDN | 55 Hz | walk backward (↑ and ↓ together cancel out) |
+| ← or A, → or D | DNa01/02 on that side | 150 Hz | turn |
+| Space | LC4, both eyes | 150 Hz for 300 ms | jump, through the giant fiber and TTMn |
+
+*Chase camera* (on): the camera stays behind the fly; choosing a camera preset turns it off.
+
+### Switches
+
+| Control | Default | Effect |
+|---|---|---|
+| Keys 1–9, 0 (numeric keypad too) | | flip switch 1–10; switches on the fly's right are pressed by its right front leg, those on its left by its left one |
+| *Switches* | 8 | 4 to 10 switches on the console |
+
+Each key sends 250 Hz for 400 ms to DNg12_e on that side; the switch flips when that
+leg's coxa promotors reach 16 Hz. Up to 4 keys wait in a queue, one leg at a time.
+
+### Connectome dashboard
+
+| Control | Default | Effect |
+|---|---|---|
+| *Stimulation* groups | LC4 at 150 Hz | regex on a field (type, instance, superclass, class, any, bodyId), Poisson frequency, start and end (ms); presets |
+| *Readouts* | giant fiber DNp01, descending neurons | up to 4 groups plotted as population rates; presets |
+| *Silencing* | none | neurons removed from the network |
+| *Dynamics* | Shiu et al. 2024 | or *flysim* (instantaneous current, no synaptic filter or delay) |
+| *Duration*, *Trials*, *Seed* | 500 ms, 1, 0 | 10–5,000 ms, 1–10 trials |
+| *dt*, *τ mem.*, *τ syn.*, *Threshold*, *Refract.*, *Delay*, *mV / synapse*, *Poisson weight* | 0.1 ms, 20 ms, 5 ms, 7 mV, 2.2 ms, 1.8 ms, 0.275 mV, 250 | model parameters (flysim: dt 0.2 ms, τ mem. 5 ms) |
+| *Weight scale* | 1 | multiplies every synaptic weight |
+| *Simulate* | ⌘/Ctrl + Enter | runs the simulation; *Cancel* stops it |
+
+Results: activity map (dorsal, frontal or lateral view; play or scrub through time, or Σ
+for the whole run; isolate an anatomical group; hover and click a neuron), readout and
+group charts (*Table* shows the numbers), raster, most active neurons and cell types
+(regex filter, click a column to sort), and a neuron inspector (*Stimulate*, *Readout*,
+*Silence*, *Whole type*, top inputs and outputs).
+
 ## The model, and its limits
 
 - Leaky integrate-and-fire network after Shiu et al., *Nature* 2024: one synapse adds
