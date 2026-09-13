@@ -4,10 +4,10 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { createFly, REST } from "./model.js";
 import { AudioEngine } from "./audio.js";
-import { Dancer } from "./dance.js";
 import { BrainLink, BodyController } from "./neural.js";
 import { Brain3D } from "./brain3d.js";
 import { Switchboard } from "./switchboard.js";
+import { Kart3D, DECK } from "./kart.js";
 
 const $ = s => document.querySelector(s);
 const stage = $("#stage"), canvas = $("#gl");
@@ -43,46 +43,10 @@ Object.assign(key.shadow.camera, { left: -2.5, right: 2.5, top: 2.5, bottom: -2.
 key.shadow.bias = -0.0004; key.shadow.normalBias = 0.01; key.shadow.radius = 3;
 scene.add(key);
 const rim = new THREE.DirectionalLight(0x7fb0ff, 1.6); rim.position.set(-3, 2.5, -4); scene.add(rim);
-const spot = new THREE.SpotLight(0xffffff, 0, 14, 0.45, 0.6, 1.2);
-spot.position.set(0, 6, 0); scene.add(spot, spot.target);
-
-// dance floor: glossy ground + additive light tiles
-const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 64),
+// glossy ground
+const floor = new THREE.Mesh(new THREE.CircleGeometry(60, 96),
   new THREE.MeshStandardMaterial({ color: 0x0e0e10, roughness: 0.7, metalness: 0.05, envMapIntensity: 0.12 }));
 floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
-const G = 11, S = 0.62;
-const tiles = new THREE.InstancedMesh(new THREE.PlaneGeometry(S * 0.9, S * 0.9),
-  new THREE.MeshBasicMaterial({ transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }), G * G);
-const TILE_COLORS = [0x3987e5, 0xd95926, 0x199e70, 0xc98500, 0xd55181, 0x9085e9].map(c => new THREE.Color(c));
-const tileLevel = new Float32Array(G * G), tileHue = new Uint8Array(G * G), tileFall = new Float32Array(G * G);
-{
-  const d = new THREE.Object3D(), black = new THREE.Color(0);
-  for (let i = 0; i < G; i++) for (let j = 0; j < G; j++) {
-    const k = i * G + j, x = (i - (G - 1) / 2) * S, z = (j - (G - 1) / 2) * S;
-    d.position.set(x, 0.002, z); d.rotation.x = -Math.PI / 2; d.updateMatrix();
-    tiles.setMatrixAt(k, d.matrix); tiles.setColorAt(k, black);
-    tileFall[k] = Math.exp(-((x * x + z * z) / 9));
-  }
-  scene.add(tiles);
-}
-function lightTiles(n) {
-  const mode = Math.floor(n / 8) % 3, hue = n % TILE_COLORS.length;
-  for (let i = 0; i < G; i++) for (let j = 0; j < G; j++) {
-    const di = i - (G - 1) / 2, dj = j - (G - 1) / 2;
-    const on = mode === 0 ? (i + j + n) % 2 === 0
-             : mode === 1 ? Math.round(Math.hypot(di, dj)) % 3 === n % 3
-             : Math.random() < 0.28;
-    if (on) { tileLevel[i * G + j] = 1; tileHue[i * G + j] = hue; }
-  }
-}
-const _c = new THREE.Color();
-function updateTiles(dt) {
-  for (let k = 0; k < G * G; k++) {
-    tileLevel[k] *= Math.exp(-dt * 3.2);
-    tiles.setColorAt(k, _c.copy(TILE_COLORS[tileHue[k]]).multiplyScalar(tileLevel[k] * tileFall[k] * 0.32));
-  }
-  tiles.instanceColor.needsUpdate = true;
-}
 
 const fly = createFly();
 scene.add(fly.root);
@@ -90,8 +54,9 @@ const grid = new THREE.GridHelper(80, 160, 0x2c2c31, 0x1d1d21);   // ground refe
 grid.position.y = 0.001; scene.add(grid);
 
 const brain = new BrainLink(), body = new BodyController(fly), brain3d = new Brain3D(scene), board = new Switchboard(scene);
+const kart3d = new Kart3D(scene);
 brain.onNote = txt => body.note(txt);
-let mode = "dance", lastAudio = 0, lastKick = -10, stimNames = "", liftLeft = 0, liftApplied = 0;
+let mode = "brain", lastAudio = 0, lastKick = -10, stimNames = "", liftLeft = 0, liftApplied = 0;
 let keysHeld = new Set(), lastDrive = 0, dragging = false;
 let presses = { L: null, R: null }, reachInfo = {}, queue = [];   // switchboard: press in progress per front leg, keys waiting
 const lastRoot = new THREE.Vector3();
@@ -112,9 +77,9 @@ function setCam(name) {
 }
 /* Keyboard mode: the camera stays behind the fly (paused while the user drags the view). */
 const _want = new THREE.Vector3();
-function chaseCamera(dt) {
+function chaseCamera(dt, D = 5.4, H = 1.9) {
   const t = controls.target, yaw = fly.root.rotation.y;
-  _want.set(t.x - Math.sin(yaw) * 5.4, t.y + 1.9, t.z - Math.cos(yaw) * 5.4);
+  _want.set(t.x - Math.sin(yaw) * D, t.y + H, t.z - Math.cos(yaw) * D);
   camera.position.lerp(_want, 1 - Math.exp(-dt * 2.5));
 }
 controls.addEventListener("start", () => { dragging = true; });
@@ -195,7 +160,6 @@ stage.addEventListener("drop", e => {
   if (f) playFile(f);
 });
 
-const opts = { enabled: true, intensity: 1, cadence: "auto", song: true };
 const bindRange = (id, valId, fmt, apply) => {
   const i = $(id), show = () => { $(valId).textContent = fmt(+i.value); apply(+i.value); };
   i.addEventListener("input", show); show();
@@ -203,10 +167,6 @@ const bindRange = (id, valId, fmt, apply) => {
 bindRange("#volume", "#vol-val", pct, v => { volume = v; if (audio.ctx) audio.setVolume(v); });
 bindRange("#thr", "#thr-val", v => `${v} dB`, v => { audio.threshold = v; $("#meter-thr").style.left = `${(v + 80) / 80 * 100}%`; });
 bindRange("#hold", "#hold-val", v => `${Math.round(v * 1000)} ms`, v => { audio.hold = v; });
-bindRange("#intensity", "#int-val", pct, v => { opts.intensity = v; });
-$("#dance-on").addEventListener("change", e => { opts.enabled = e.target.checked; });
-$("#cadence").addEventListener("change", e => { opts.cadence = e.target.value; });
-$("#song").addEventListener("change", e => { opts.song = e.target.checked; });
 
 /* ------------------------------------------------------- level plot */
 let ink = {};
@@ -236,17 +196,20 @@ function drawSig(t) {
 }
 
 /* ------------------------------------------------------------------ loop */
-const dancer = new Dancer(), leds = [...$("#beats").children];
-let beats = 0, spotPulse = 0, lastText = 0, lastChip = "", last = null;
+const leds = [...$("#beats").children];
+let lastText = 0, lastChip = "", last = null;
 function frame(ts) {
   requestAnimationFrame(frame);
   const now = ts / 1000, dt = last == null ? 0 : Math.min(0.1, now - last);
   last = now;
   const f = audio.update();
-  let energy = 0;
-  if (mode !== "dance") {
+  {
     brain.consume(dt);
-    const out = body.update(dt, brain.S, brain.raw, base, mode === "board" ? { tethered: true, reach: reachOpt() } : undefined);
+    const k = brain.kart;
+    if (mode === "car" && k) { body.pos.set(k[0], 0, k[1]); body.yaw = k[2]; }   // the fly rides the kart
+    const out = body.update(dt, brain.S, brain.raw, base,
+      mode === "board" ? { tethered: true, reach: reachOpt() } : mode === "car" ? { tethered: true } : undefined);
+    if (mode === "car") seatInKart(out, dt);
     fly.apply(out.pose, out.feet);
     followCamera();
     if (mode === "board") { checkPresses(now, out.reach); board.update(dt); }
@@ -263,23 +226,16 @@ function frame(ts) {
       if (f.kick) lastKick = now;
       if (now - lastAudio > 0.1) { lastAudio = now; brain.audio(f.active ? f.level : 0); }
     }
-    if (mode === "keys") {
+    if (mode === "keys" || mode === "car") {
       if (keysHeld.size && now - lastDrive > 0.1) sendDrive();   // keep-alive: inputs expire after 300 ms
-      if ($("#chase").checked && !dragging && !camTween) chaseCamera(dt);
+      if (mode === "keys" && $("#chase").checked && !dragging && !camTween) chaseCamera(dt);
+      if (mode === "car" && !dragging && !camTween) chaseCamera(dt, 8.5, 3.2);
     }
-  } else {
-    const d = dancer.update(dt, f, opts, base);
-    energy = d.energy;
-    fly.apply(d.pose);
-    if (f.beat) { lightTiles(beats++); spotPulse = 1; }
   }
   if (Math.abs(liftLeft) > 1e-4) {                             // camera rises to frame the 3D brain
     const d = liftLeft * (1 - Math.exp(-dt * 5));
     controls.target.y += d; camera.position.y += d; liftLeft -= d; liftApplied += d;
   }
-  updateTiles(dt);
-  spotPulse *= Math.exp(-dt * 6);
-  spot.intensity = energy * (12 + 40 * spotPulse);
   if (camTween) {
     camTween.t = Math.min(1, camTween.t + dt / 0.7);
     const e = 1 - Math.pow(1 - camTween.t, 3);
@@ -299,12 +255,8 @@ function frame(ts) {
     lastText = now;
     $("#db-val").textContent = f.db > -99 ? `${Math.round(f.db)} dB` : "–";
     $("#bpm").textContent = f.bpm ? `${Math.round(f.bpm)} BPM` : "– BPM";
-    if (mode !== "dance") updateBrainUI();
-    const state = mode !== "dance" ? brainChip()
-      : f.mode === "none" ? ["", "No audio source"]
-      : !f.active ? ["listening", "Stopped · silence"]
-      : !opts.enabled ? ["listening", "Sound detected · dancing off"]
-      : ["dancing", `Twerking${f.bpm ? ` · ${Math.round(f.bpm)} BPM` : ""}`];
+    updateBrainUI();
+    const state = brainChip();
     if (state[1] !== lastChip) {
       lastChip = state[1];
       $("#state-chip").className = `chip ${state[0]}`; $("#state-text").textContent = state[1];
@@ -314,13 +266,12 @@ function frame(ts) {
 
 /* ------------------------------------------------------------- 3D brain */
 async function showBrain(on) {
-  on = on && mode !== "dance";
   if (on === brain3d.group.visible) return;
   if (on) {
     try {
       if (!brain3d.N) status("Loading the neuron positions…");
       await brain3d.load();
-      if (!$("#live-brain").checked || mode === "dance") return;
+      if (!$("#live-brain").checked) return;
       status(`3D brain: ${brain3d.N.toLocaleString("en-US")} neurons at their soma position`);
     } catch (e) { return status(`3D brain unavailable: ${e.message}`, true); }
   } else brain3d.clear();
@@ -337,32 +288,35 @@ const GROUP_LABEL = { hearing: "Hearing · Johnston's organ → descending neuro
 const FUNCS = [["pro", "pro"], ["rem", "rem"], ["trx", "tr ext"], ["trf", "tr flx"],
                ["tix", "ti ext"], ["tif", "ti flx"], ["tad", "ta dep"], ["tal", "ta lev"]];
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-let chanRows = {}, legCells = {}, chanInfo = {};
+let chanRows = {}, legCells = {}, chanInfo = {}, carChan = {};
 
 const MODE_NOTE = {
-  dance: "Choreography locked to the sound: no neurons are simulated.",
   brain: "The body follows the descending and motor neurons of the connectome simulation.",
   keys: "The arrow keys drive the fly's command descending neurons; the body follows the connectome simulation.",
   board: "The number keys make the tethered fly press switches with its front legs, moved by its own nerve cord.",
+  car: "The fly drives a kart: its leg motor neurons turn the wheel and press the pedals.",
 };
 function setMode(m) {
+  releaseKeys();
   const prev = mode;
   mode = m;
   if (prev === "board" && m !== "board") {                     // leave the console view: back to the fly
     controls.target.set(fly.root.position.x, 0.42 + liftApplied, fly.root.position.z - 0.1);
-    if (m !== "keys") setCam("rear");
+    if (m !== "keys" && m !== "car") setCam("rear");
+  }
+  if (prev === "car" && m !== "car") {                         // out of the kart, back on the floor
+    brain.world(null); body.reset(); fly.root.position.set(0, 0, 0); followCamera();
   }
   for (const b of $("#mode-seg").children) b.classList.toggle("on", b.dataset.mode === m);
-  $("#brain-sec").hidden = m === "dance"; $("#keys-sec").hidden = m !== "keys"; $("#board-sec").hidden = m !== "board";
-  $("#dance-sec").hidden = m !== "dance"; $("#evlog").hidden = m === "dance";
+  $("#keys-sec").hidden = m !== "keys"; $("#board-sec").hidden = m !== "board"; $("#car-sec").hidden = m !== "car";
   $("#mode-note").textContent = MODE_NOTE[m];
   board.group.visible = m === "board";
-  if (m !== "keys") releaseKeys();
+  kart3d.setVisible(m === "car");
   if (m !== "board") { presses = { L: null, R: null }; queue = []; }
-  if (m === "dance") { brain.stop(); $("#live-start").textContent = "Start simulation"; body.reset(); fly.root.position.set(0, 0, 0); followCamera(); }
   if (m === "board") { body.reset(); fly.root.position.set(0, 0, 0); followCamera(); boardView(); }
-  if (m === "keys" || m === "board") {
-    document.activeElement?.blur();                            // Space must not click the focused button
+  if (m === "car") { body.reset(); if (brain.id != null) brain.world("kart", true); }
+  if (m !== "brain") {
+    document.activeElement?.blur();                            // Space and digits must not click a focused button
     if (brain.id == null) startLive();
   }
   showBrain($("#live-brain").checked);
@@ -377,13 +331,15 @@ const KEY_CHAN = { up: "fwd", down: "back", left: "turnL", right: "turnR", jump:
 const typing = e => /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) && !["checkbox", "button"].includes(e.target.type);
 function sendDrive() {
   lastDrive = performance.now() / 1000;
-  const both = keysHeld.has("up") && keysHeld.has("down");     // opposite commands cancel out
-  brain.drive([...keysHeld].filter(k => !(both && (k === "up" || k === "down"))));
+  // opposite commands cancel out (driving both of a pair together can also run the network away)
+  const drop = k => (keysHeld.has("up") && keysHeld.has("down") && (k === "up" || k === "down"))
+                 || (keysHeld.has("left") && keysHeld.has("right") && (k === "left" || k === "right"));
+  brain.drive([...keysHeld].filter(k => !drop(k)), mode === "car" ? "car" : "walk");
 }
 function setKey(k, on) {
   if (on === keysHeld.has(k)) return;
   if (on) keysHeld.add(k); else keysHeld.delete(k);
-  $(`#keypad [data-k="${k}"]`).classList.toggle("on", on);
+  for (const e of document.querySelectorAll(`.keypad [data-k="${k}"]`)) e.classList.toggle("on", on);
   sendDrive();
 }
 function releaseKeys() { for (const k of [...keysHeld]) setKey(k, false); }
@@ -399,9 +355,12 @@ addEventListener("keydown", e => {
     if (!e.repeat) press(d === 0 ? 9 : d - 1);
     return;
   }
-  if (mode !== "keys") return;
+  if (mode !== "keys" && mode !== "car") return;
+  if (mode === "car" && e.code === "KeyR") { e.preventDefault(); if (!e.repeat) carReset(); return; }
   if (e.code === "Space") {
-    e.preventDefault(); $('#keypad [data-k="jump"]').classList.add("on");
+    e.preventDefault();
+    if (mode !== "keys") return;
+    $('#keypad [data-k="jump"]').classList.add("on");
     if (!e.repeat) jump();
     return;
   }
@@ -486,6 +445,20 @@ function renderReachMap() {
   $("#reachmap").replaceChildren(...["R", "L"].flatMap(s => [el("dt", null, `Keys ${range(s)}`),   // switch 1 is on the right
     el("dd", null, `${reachInfo[s].label} · ${reachInfo[s].hz} Hz × ${reachInfo[s].ms} ms · flips when the ${reachInfo[s].read_label} reach ${reachInfo[s].press} Hz`)]));
 }
+/* ------------------------------------------------------------------ kart */
+/* The fly stands on the kart's deck: front tarsi on the steering wheel rim, hind tarsi on
+   the pedals. The kart itself moves as the server's world.Driver computes it. */
+function seatInKart(out, dt) {
+  kart3d.update(brain.kart, dt);
+  if (!brain.kart) return;
+  fly.root.position.y = DECK;
+  for (const f of out.feet) f.y += DECK;
+  out.feet[1] = kart3d.grip("L", new THREE.Vector3()); out.feet[0] = kart3d.grip("R", new THREE.Vector3());
+  out.feet[5] = kart3d.pedal("L", new THREE.Vector3()); out.feet[4] = kart3d.pedal("R", new THREE.Vector3());
+}
+function carReset() { if (brain.id != null) { brain.world("kart", true); body.note("Kart back on the road"); } }
+$("#car-reset").addEventListener("click", carReset);
+
 $("#sw-count").addEventListener("change", e => {
   board.setCount(+e.target.value); presses = { L: null, R: null }; queue = [];
   $("#board-state").textContent = `keys 1–${board.label(board.n - 1)}`;
@@ -496,9 +469,15 @@ function buildBrainUI(info) {
   chanInfo = Object.fromEntries(info.channels.map(c => [c.key, c]));
   reachInfo = Object.fromEntries(info.reach.map(r => [r.side, r])); renderReachMap();
   const ARROW = { up: "↑ W", down: "↓ S", left: "← A", right: "→ D" }, loom = info.events.find(e => e.key === "loom");
-  $("#keymap").replaceChildren(...info.drive.flatMap(d => [el("dt", null, ARROW[d.key]),
-    el("dd", null, `${d.label} · ${d.hz} Hz · ${d.n} neurons`)]),
+  $("#keymap").replaceChildren(...info.keysets.walk.flatMap(d => [el("dt", null, ARROW[d.key]),
+    el("dd", null, `${d.label} · ${d.hz} Hz · ${d.n} neuron${d.n > 1 ? "s" : ""}`)]),
     el("dt", null, "Space"), el("dd", null, `Jump: looming on both eyes (LC4, ${loom.n} neurons) → TTMn`));
+  $("#carmap").replaceChildren(...info.keysets.car.flatMap(d => [el("dt", null, ARROW[d.key]),
+    el("dd", null, `${d.label} · ${d.hz} Hz · ${d.n} neuron${d.n > 1 ? "s" : ""}`)]),
+    el("dt", null, "R"), el("dd", null, "back on the road"));
+  const C = info.controls;
+  carChan = { up: C.throttle.read, down: C.brake.read, left: C.wheel_left.read, right: C.wheel_right.read };
+  kart3d.setTrack(info.track);
   for (const kind of ["sens", "opto"]) {
     $(kind === "sens" ? "#ev-sens" : "#ev-opto").replaceChildren(...info.events.filter(e => e.kind === kind).map(e => {
       const b = el("button", "ghost", e.label);
@@ -544,6 +523,18 @@ function updateBrainUI() {
     const a = 1 - Math.exp(-(S[ch] || 0) / (k === "jump" ? 5 : 20));
     $(`#keypad [data-k="${k}"]`).style.background = `color-mix(in srgb, var(--accent) ${Math.round(a * 70)}%, var(--surface-2))`;
   }
+  // Drive: keys light up with the motor neurons the kart reads; gauges from the server's kart
+  for (const [k, chs] of Object.entries(carChan)) {
+    const r = chs.reduce((s, c) => s + (S[c] || 0), 0) / chs.length, a = 1 - Math.exp(-r / 12);
+    $(`#carpad [data-k="${k}"]`).style.background = `color-mix(in srgb, var(--accent) ${Math.round(a * 70)}%, var(--surface-2))`;
+  }
+  if (mode === "car" && brain.kart) {
+    const [, , , v, wheel, thr, brk, off, dist] = brain.kart;
+    $("#car-speed").textContent = v.toFixed(1); $("#car-dist").textContent = Math.round(dist);
+    $("#car-off").textContent = off.toFixed(1);
+    $("#car-wheel").style.left = `${50 + Math.min(0, wheel) * 50}%`; $("#car-wheel").style.width = `${Math.abs(wheel) * 50}%`;
+    $("#car-thr").style.width = `${thr * 100}%`; $("#car-brk").style.width = `${brk * 100}%`;
+  }
   if (mode === "keys") $("#keys-state").textContent = brain.id == null ? "start the simulation"
     : keysHeld.size ? [...keysHeld].map(k => ({ up: "↑", down: "↓", left: "←", right: "→" })[k]).join(" ") : "arrow keys or WASD";
   const st = brain.status;
@@ -551,14 +542,15 @@ function updateBrainUI() {
   if (brain.error) status(`Simulation: ${brain.error}`, true);
   const log = body.events.slice(-4);
   const hint = brain.id == null ? "Start the simulation" : mode === "keys" ? "Hold an arrow key to walk, Space to jump"
-    : mode === "board" ? `Press 1–${board.label(board.n - 1)} to flip a switch` : "Send a stimulus";
+    : mode === "board" ? `Press 1–${board.label(board.n - 1)} to flip a switch`
+    : mode === "car" ? "Hold ↑ to accelerate, ↓ to brake, ← → to steer · R: back on the road" : "Send a stimulus";
   $("#evlog").replaceChildren(...(log.length ? log : [[body.t, hint]]).map(([t, txt]) => {
     const d = el("div"); d.append(el("b", null, `${t.toFixed(1)} s`), txt); return d;
   }));
 }
 
 function brainChip() {
-  const who = mode === "keys" ? "Keyboard" : mode === "board" ? "Switchboard" : "Brain";
+  const who = { keys: "Keyboard", board: "Switchboard", car: "Drive" }[mode] || "Brain";
   if (brain.id == null) return ["", `${who} · simulation stopped`];
   const st = brain.status;
   if (!st) return ["listening", `${who} · starting…`];
@@ -568,7 +560,7 @@ function brainChip() {
 
 const liveParams = () => ({ model: "shiu", dt: +$("#live-dt").value, w_scale: +$("#live-w").value,
                             std_u: +$("#live-u").value, std_tau: +$("#live-tau").value,
-                            quench_ms: $("#live-quench").checked ? 1000 : 0 });
+                            quench_ms: $("#live-quench").checked ? 1000 : 0, world: mode === "car" ? "kart" : null });
 async function startLive(note) {
   try {
     status("Starting the simulation…");
@@ -587,11 +579,12 @@ $("#live-start").addEventListener("click", () => {
 $("#live-zero").addEventListener("click", () => startLive("Network reset to rest"));
 $("#live-reset").addEventListener("click", () => { body.reset(); });
 
+setMode("brain");
 requestAnimationFrame(frame);
-status("Ready · pick a sound source: demo beat, file or microphone");
+status("Ready · start the simulation");
 
 window.fly = {
   get pose() { return { ...base }; },
   set(k, v) { if (k in base) { base[k] = +v; syncSliders(); } },
-  audio, dancer, model: fly, scene, camera, brain3d, board,
+  audio, model: fly, scene, camera, brain3d, board, kart3d, brain,
 };

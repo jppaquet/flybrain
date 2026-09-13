@@ -203,6 +203,8 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/search":
                 return self.send(200, search(self.C, qs.get("q", [""])[0],
                                              qs.get("field", ["any"])[0]))
+            if p == "/api/live/session":
+                return self.send(200, self.live.current())
             if p == "/api/live/frames":
                 try: s = self.live.get(qs.get("id", ["0"])[0])
                 except KeyError as e: return self.send(409, {"error": str(e)})
@@ -239,8 +241,12 @@ class Handler(BaseHTTPRequestHandler):
                     if act == "start": return self.send(200, self.live.start(body.get("params", {})))
                     if act == "event": self.live.event(body["id"], body["key"])
                     elif act == "audio": self.live.audio(body["id"], body.get("level", 0), bool(body.get("hit")))
-                    elif act == "drive": self.live.drive(body["id"], set(body.get("keys", [])))
+                    elif act == "drive": self.live.drive(body["id"], set(body.get("keys", [])), body.get("keyset", "walk"))
                     elif act == "reach": self.live.reach(body["id"], body["side"])
+                    elif act == "world": return self.send(200, self.live.world(body["id"], body.get("world"), bool(body.get("reset"))))
+                    elif act == "stim": return self.send(200, self.live.stim(
+                        body["id"], str(body.get("name", "api")), body["query"], body.get("field", "type"),
+                        body.get("side"), float(body.get("hz", 0)), body.get("ms")))
                     elif act == "stop": self.live.get(body["id"]).stop()
                     else: return self.send(404, {"error": "not found"})
                 except (KeyError, StopIteration) as e:

@@ -8,22 +8,28 @@ on your own machine, and watch it drive a 3D fly.
   class, body ID…), silence others, choose readouts, and run a spiking simulation.
   Results: activity map of every soma, raster, population rates per anatomical group,
   most active neurons and cell types, and a per-neuron inspector (inputs, outputs).
-- **3D fly** (`/fly`) — a procedural 3D male fly with inverse-kinematics legs, and four
-  ways to drive it:
-  - *Dance*: twerks to music (demo beat, audio file or microphone) and stops on silence.
-    Pure choreography, no neurons involved.
-  - *Brain*: a continuous simulation of the connectome drives the body through its
-    descending neurons and motor neurons (legs by muscle, wings, neck, abdomen,
-    proboscis). Looming → giant fiber → TTMn → jump; taste → MN9 → proboscis;
-    DNp09 → walking; DNa02 → turning; music → auditory JO-B neurons → wing motor
-    neurons → wing flicks on the beat… Above the fly, a 3D point cloud of all
-    165,384 neurons lights up as they fire.
-  - *Keyboard*: steer the fly with the arrow keys (or WASD) through its own command
-    descending neurons — ↑ DNp09 (forward), ↓ MDN (backward), ← → DNa01/02 (turns) —
-    and make it jump with Space (looming on both eyes → giant fiber → TTMn).
-  - *Switches*: the fly stands tethered in front of a console of 4–10 toggle switches;
-    the number keys make it reach out with a front leg and flip them, through DNg12_e
-    and the front-leg motor neurons it recruits.
+- **3D fly** (`/fly`) — a procedural 3D male fly with inverse-kinematics legs, driven by
+  a continuous simulation of the connectome in four modes:
+  - *Brain*: sensory stimuli (looming, taste, sound, wind, odour) and the music you play,
+    through Johnston's organ, move the body through its descending and motor neurons.
+  - *Keyboard*: the arrow keys steer the fly through neurons presynaptic to its walking
+    commands; Space shows a looming threat and the fly jumps.
+  - *Switches*: the fly, tethered in front of a console, flips switches with its front
+    legs when you press the number keys.
+  - *Drive*: the fly drives a kart — front legs on the steering wheel, hind legs on the
+    accelerator and brake.
+
+  Above the fly, a 3D point cloud of all 165,384 neurons lights up as they fire.
+- **Machine learning** — `flyenv.py` turns the fly into an end user for your agents:
+  Gymnasium-style environments to learn to drive (`DriveEnv`) or to dance (`DanceEnv`),
+  a low-level `FlyBrain`, and an HTTP API to run a trained policy on the live 3D page.
+  See [API.md](API.md).
+
+**Everything goes through synapses.** Keys, stimuli and agents only drive neurons with
+spikes; the body only reads neurons downstream of them — the spikes of driven neurons are
+never counted. The hand-written parts are the body mechanics only: the tripod gait, the
+jump trajectory, the path of a leg toward a switch, and the mapping from motor neurons to
+joint angles or kart controls.
 
 ## Requirements
 
@@ -74,39 +80,48 @@ ORN DA1, Johnston's organ…), set a Poisson rate and a time window, add readout
 *Simulate* (⌘/Ctrl+Enter). Click any neuron (map, raster, tables) to inspect its
 connections and to stimulate, read out or silence it.
 
-**3D fly — brain mode.** Choose *Brain*, *Start simulation*, then
-send stimuli: sensory (looming left/right, taste, sound, wind, cVA odour) or direct
-“optogenetic” activation of a descending neuron (giant fiber, DNp09, MDN, DNa02, pIP10,
-MN9). The panel shows the live rates of the motor channels, including a legs × muscles
-grid. Tick *The sound drives Johnston's organ* and play music: the auditory neurons of
-Johnston's organ (JO-B) receive a background drive that follows the volume, plus a short
-burst on every kick drum, and the fly flicks its wings on the beat.
+**3D fly — Brain.** *Start simulation*, then send stimuli: sensory (looming left, right
+or on both eyes, taste, sound, wind, cVA odour) or the direct activation of a neuron
+whose effect is read downstream (giant fiber → TTMn → jump; pIP10 → wing motor neurons).
+The panel shows the live rates of the motor channels, including a legs × muscles grid.
+Tick *The sound drives Johnston's organ* and play music (demo beat, audio file or
+microphone): the auditory neurons JO-B receive a background drive that follows the
+volume, plus a burst on every kick drum, and the fly flicks its wings on the beat.
 
 The brain floating above the fly shows every neuron at its soma position, in the fly's
 own orientation (brain over the head, ventral nerve cord over the thorax), coloured by
 anatomical group. A neuron flashes white when it fires, and the neurons driven by a
 stimulus glow amber. Untick *Show the brain in 3D above the fly* to hide it.
 
-**3D fly — keyboard mode.** Choose *Keyboard*: the simulation starts, and each held key
-drives the fly's command descending neurons with Poisson spikes, the way experimenters
-activate them with light in real flies (DNp09 at 25 Hz, MDN at 55 Hz, DNa01/02 at 150 Hz).
-The body reads those neurons back from the simulation, with the nerve cord motor neurons
-they recruit, so the network's side effects show: DNp09 also drives the left DNa02 a
-little, and the fly tends to drift left. Each key lights up with the firing of its
-neurons. Space shows a looming threat to both eyes, which fires the jump motor neuron
+**3D fly — Keyboard.** The body walks, backs up and turns according to the descending
+neurons DNp09, MDN and DNa01/02, so the keys never drive those: each drives their
+strongest clean presynaptic partner, found by screening their inputs — ↑ ICL012m (DNp09
+reaches ~32 Hz), ↓ DNpe023 (MDN ~63 Hz), ← → LAL018 of that side (DNa01/02 ~45 Hz; the
+lateral accessory lobe is the fly's steering centre), all at 150 Hz with at most a few
+hundred neurons active. Each key lights up with the firing of the descending neurons it
+recruits. Space shows a looming threat to both eyes, which fires the jump motor neuron
 TTMn within ~15 ms. The chase camera stays behind the fly; pick a view to leave it.
 
-**3D fly — switchboard mode.** Choose *Switches*: the fly is tethered in front of a console
-(4 to 10 switches, seen from the front), and keys 1–9, 0 flip the switches. The switches
-on the fly's right are pressed by its right front leg, those on its left by its left one.
-A key sends a 400 ms burst to DNg12_e on that
-side — in a screen of all 472 descending neuron types, the one that moves a front leg most
-specifically: alone it recruits about 20 neurons, mostly that leg's coxa promotors. The
-leg reaches toward the switch as far as those motor neurons fire in the simulation, and
-the switch flips only if they reach 16 Hz (they peak at 30–60 Hz); the log gives their peak
-rate. Keys pressed
-during a reach wait their turn: one leg at a time, because driving both DNg12_e together
-tips the network into its self-sustained state.
+**3D fly — Switches.** The fly is tethered in front of a console (4 to 10 switches,
+seen from the front), and keys 1–9, 0 flip the switches. The switches on the fly's right
+are pressed by its right front leg, those on its left by its left one. A key sends a
+400 ms burst to DNg12_e on that side — in a screen of all 472 descending neuron types,
+the one that moves a front leg most specifically: alone it recruits about 20 neurons,
+mostly that leg's coxa promotors. The leg reaches toward the switch as far as those
+motor neurons fire, and the switch flips only if they reach 16 Hz (they peak at
+30–60 Hz); the log gives their peak rate. Keys pressed during a reach wait their turn:
+one leg at a time, because driving both DNg12_e together tips the network into its
+self-sustained state.
+
+**3D fly — Drive.** The fly stands on a kart on a circular road, its front legs on the
+steering wheel and its hind legs on the pedals, and only its motor neurons move the
+kart: the front legs' coxa promotors push the wheel rim, the right hind leg's extensors
+press the accelerator, the left hind leg's flexors pull the brake lever (no descending
+neuron extends the left hind leg cleanly in this connectome; one flexes it). Each key
+drives the descending neuron that moves one leg most specifically (screens of all DN
+types): ↑ DNg16 right, ↓ DNpe008 left, ← DNg12_e right, → DNg12_e left. R puts the kart
+back on the road. The kart's physics runs on the server (`world.py`), so the same kart
+is available for learning (`flyenv.DriveEnv`).
 
 **Command line.** `flysim.py` runs the same model without the browser:
 
@@ -116,53 +131,64 @@ tips the network into its self-sustained state.
 .venv/bin/python flysim.py run --stim '^LC4$' --readout '^DNp01$' --ms 300
 ```
 
+## Machine learning
+
+```python
+import numpy as np, flyenv
+env = flyenv.DriveEnv()                              # or flyenv.DanceEnv()
+obs, info = env.reset(seed=0)
+obs, reward, terminated, truncated, info = env.step(np.array([150, 0, 0, 0]))
+```
+
+- **Actions** are Poisson rates for groups of neurons (by default the Drive keys; any
+  neurons with `inputs=[...]`); **observations** are the kart state or the beat phase and
+  the motor activations the legs actually produce; the simulation steps synchronously,
+  about as fast as real time on a laptop.
+- `examples/drive_hillclimb.py` learns a linear driving policy by hill climbing and saves
+  it; `examples/live_policy.py` then drives the kart of the live 3D page with it, over
+  HTTP (open `/fly`, choose Drive, run the script).
+- The HTTP API drives any group of neurons in the live session (`POST /api/live/stim`)
+  and streams the channel rates, the spikes and the kart state. Details in
+  [API.md](API.md).
+
 ## Modes and options
 
 ### The four modes of the 3D fly
 
-| Mode | Through the connectome? | Input | What moves the body |
-|---|---|---|---|
-| **Dance** | No | sound (demo beat, file, microphone) | a hand-written twerk locked to the beat |
-| **Brain** | Yes | stimulus buttons, and optionally the sound (→ JO-B) | the rates of descending and motor neurons read from the simulation |
-| **Keyboard** | Yes, partly circular | arrow keys / WASD, Space | the driven descending neurons themselves, plus the motor neurons they recruit |
-| **Switches** | Yes | keys 1–9, 0 | the front-leg motor neurons recruited by DNg12_e (not the neuron that is driven) |
+| Mode | Input | What the body reads |
+|---|---|---|
+| **Brain** | stimulus buttons; optionally the sound (→ JO-B) | descending and motor neurons downstream of the stimulated ones |
+| **Keyboard** | arrow keys / WASD, Space | DNp09, MDN, DNa01/02 — one synapse downstream of the neurons the keys drive — and the motor neurons they recruit |
+| **Switches** | keys 1–9, 0 | the front-leg motor neurons recruited by DNg12_e |
+| **Drive** | arrow keys / WASD, R | the leg motor neurons recruited by the four leg descending neurons |
 
-In the three connectome modes the neurons decide whether the fly walks, turns, jumps or
-reaches, and how strongly; the tripod gait, the jump trajectory and the path of the leg
-toward a switch are hand-written. The 3D brain shows the live spikes in all three.
+In every mode the neurons decide whether the fly walks, turns, jumps, reaches or drives,
+and how strongly; the spikes of the neurons that a key or a stimulus drives are never
+read. The 3D brain shows the live spikes.
 
-### 3D fly — controls in every mode
+### Controls in every mode
 
 | Control | Default | Effect |
 |---|---|---|
 | *Rear ¾ / Side / Front / Top*, ↻ | Rear ¾ | camera presets and auto-rotate; drag to orbit, scroll to zoom |
-| *▶ Demo beat / ♫ File… / 🎤 Mic / ■ Stop* | no source | audio source; an audio file can also be dropped on the 3D view |
-| *Demo: one silent bar in 8* | on | the demo beat goes silent one bar in eight, to see the fly stop |
+| *▶ Demo beat / ♫ File… / 🎤 Mic / ■ Stop* | no source | sound source; an audio file can also be dropped on the 3D view; the fly hears it only with *The sound drives Johnston's organ* |
+| *Demo: one silent bar in 8* | on | the demo beat goes silent one bar in eight |
 | *Volume* | 80 % | playback volume |
-| *Silence threshold* | −50 dB | below it, the sound counts as silence |
-| *Stop after* | 350 ms | how long the silence must last before the fly stops |
+| *Silence threshold* | −50 dB | below it, the sound counts as silence (no drive to JO-B) |
+| *Stop after* | 350 ms | how long the silence must last |
 | *Body* sliders, *Reset* | rest pose | height, pitch, roll, heading, leg spread, head yaw and pitch, abdomen lift and side, each wing, proboscis, antennae; every mode adds its movement to this pose |
 | Browser console | | `fly.pose`, `fly.set("abdPitch", 0.4)` |
 
-### Dance
+### The live simulation
 
 | Control | Default | Effect |
 |---|---|---|
-| *Twerk when there is sound* | on | off: the fly listens but stays still |
-| *Intensity* | 100 % (0–150 %) | amplitude of the dance |
-| *Cadence* | Auto | hits per beat: 1 or 2, or auto (1 above 135 BPM, otherwise 2) |
-| *Courtship song* | on | on every downbeat, one wing extends and vibrates, alternating sides |
-
-### Brain, Keyboard and Switches — the live simulation
-
-| Control | Default | Effect |
-|---|---|---|
-| *Start simulation / Stop* | | Keyboard and Switches start it by themselves |
+| *Start simulation / Stop* | | Keyboard, Switches and Drive start it by themselves |
 | *Reset network* | | restarts from a network at rest, same parameters |
 | *Recenter* | | brings the fly back to the centre |
 | *Weight scale* | 0.5 | multiplies every synaptic weight; at 1 the activity runs away |
 | *dt (ms)* | 0.2 | simulation time step |
-| *Depression U* | 0 | short-term synaptic depression (0 = off): prevents the runaway state but cuts the pathways that need fast firing |
+| *Depression U* | 0 | short-term synaptic depression (0 = off): prevents the runaway state but cuts almost all transmission |
 | *Recovery τ (ms)* | 200 | recovery time of that depression |
 | *Safeguard* | on | resets the network if activity persists 1 s after the last stimulus |
 | *Show the brain in 3D above the fly* | on | the point cloud of all 165,384 neurons |
@@ -170,32 +196,27 @@ toward a switch are hand-written. The 3D brain shows the live spikes in all thre
 
 Stimulus buttons (Brain mode):
 
-| Button | Neurons driven | Drive |
-|---|---|---|
-| *Looming, left / right / both eyes* | LC4 | 150 Hz for 300 ms |
-| *Taste (LB3c + taste pegs)* | gustatory receptor neurons that reach MN9 | 150 Hz for 800 ms |
-| *Sound (JO-B)* | auditory neurons of Johnston's organ | 200 Hz for 500 ms |
-| *Wind (JO-C/E)* | wind and gravity neurons of Johnston's organ | 150 Hz for 500 ms |
-| *cVA odour (ORN DA1)* | pheromone olfactory receptor neurons | 150 Hz for 800 ms |
-| *Giant fiber* | DNp01 | 200 Hz for 100 ms |
-| *DNp09: walk*, *MDN: walk backward* | DNp09, MDN | 150 Hz for 1.5 s |
-| *DNa02 left / right* | DNa01/02 on one side | 150 Hz for 1 s |
-| *pIP10: song* | pIP10 | 150 Hz for 1.5 s |
-| *MN9: proboscis* | MN9 | 150 Hz for 800 ms |
-
-The *Motor readout* shows the live rates of the hearing, locomotion, jump, proboscis,
-wing, head and abdomen channels, and a legs × muscles grid (8 muscle groups × 6 legs).
+| Button | Neurons driven | Drive | Read downstream |
+|---|---|---|---|
+| *Looming, left / right / both eyes* | LC4 | 150 Hz for 300 ms | giant fiber, TTMn (jump), escape DNs |
+| *Taste (LB3c + taste pegs)* | gustatory receptor neurons that reach MN9 | 150 Hz for 800 ms | MN9, proboscis |
+| *Sound (JO-B)* | auditory neurons of Johnston's organ | 200 Hz for 500 ms | escape DNs, wing motor neurons |
+| *Wind (JO-C/E)* | wind and gravity neurons of Johnston's organ | 150 Hz for 500 ms | antennae, front legs |
+| *cVA odour (ORN DA1)* | pheromone olfactory receptor neurons | 150 Hz for 800 ms | |
+| *Giant fiber* | DNp01 | 200 Hz for 100 ms | TTMn (jump) |
+| *pIP10: song* | pIP10 | 150 Hz for 1.5 s | wing motor neurons |
 
 ### Keyboard
 
-| Key | Neurons driven | Rate | Effect |
+| Key | Neurons driven | Read (one synapse downstream) | Effect |
 |---|---|---|---|
-| ↑ or W | DNp09 | 25 Hz | walk forward |
-| ↓ or S | MDN | 55 Hz | walk backward (↑ and ↓ together cancel out) |
-| ← or A, → or D | DNa01/02 on that side | 150 Hz | turn |
-| Space | LC4, both eyes | 150 Hz for 300 ms | jump, through the giant fiber and TTMn |
+| ↑ or W | ICL012m, 150 Hz | DNp09 ~32 Hz | walk forward |
+| ↓ or S | DNpe023, 150 Hz | MDN ~63 Hz | walk backward |
+| ← or A, → or D | LAL018 of that side, 150 Hz | DNa01/02 of that side ~45 Hz | turn |
+| Space | LC4 on both eyes, 150 Hz for 300 ms | TTMn | jump |
 
-*Chase camera* (on): the camera stays behind the fly; choosing a camera preset turns it off.
+Opposite keys cancel out. *Chase camera* (on): the camera stays behind the fly; choosing
+a camera preset turns it off.
 
 ### Switches
 
@@ -206,6 +227,20 @@ wing, head and abdomen channels, and a legs × muscles grid (8 muscle groups × 
 
 Each key sends 250 Hz for 400 ms to DNg12_e on that side; the switch flips when that
 leg's coxa promotors reach 16 Hz. Up to 4 keys wait in a queue, one leg at a time.
+
+### Drive
+
+| Key | Neurons driven (150 Hz) | Motor neurons read | Control |
+|---|---|---|---|
+| ↑ or W | DNg16 right | right hind leg trochanter extensors (~17 Hz) | accelerator |
+| ↓ or S | DNpe008 left | left hind leg tibia flexors (~12 Hz) | brake |
+| ← or A | DNg12_e right | right front leg coxa promotors (~16–21 Hz) | wheel to the left |
+| → or D | DNg12_e left | left front leg coxa promotors | wheel to the right |
+| R | | | back on the road |
+
+A spring recentres the wheel: to follow the curve, the fly must keep pushing. The panel
+shows the speed, the distance along the road, the offset from its centre, and the wheel,
+accelerator and brake as the legs actually move them.
 
 ### Connectome dashboard
 
@@ -233,25 +268,24 @@ group charts (*Table* shows the numbers), raster, most active neurons and cell t
   transmitters are treated as excitatory), 1.8 ms synaptic delay. A simpler
   instantaneous-current variant (`flysim`) is also available.
 - MaleCNS has ~1.6× more synapses per neuron than FlyWire, on which that model was
-  tuned: at full weight, activity explodes and never stops. Brain mode therefore
-  scales weights by 0.5.
+  tuned: at full weight, activity explodes and never stops. The live simulation
+  therefore scales weights by 0.5.
+- Always through synapses: the readouts ignore the spikes of every driven neuron, so
+  driving a descending neuron and reading it back is impossible. The input neurons of
+  each mode were chosen by screening the connectome for the most specific clean path
+  to what the body reads.
 - Sound follows the real auditory route (JO-A/B hear vibrations, JO-C/E sense wind and
   gravity). In this connectome JO-B reaches the giant fiber, the escape descending
   neurons DNp02/06/11 and the wing motor neurons, but no path reaches the walking
   descending neurons: music makes the fly move its wings and antennae, not walk.
-- Even so, some stimuli (wind, taste) push the network into a self-sustained state,
-  mostly in the central complex. A safeguard resets the network 1 s after the last
-  stimulus if activity persists, and logs it. Short-term synaptic depression is
-  available as an option: it prevents that state but also silences the pathways that
-  need fast firing (TTMn, MN9).
-- Keyboard mode: the keys drive the same descending neurons the body reads for walking,
-  so walking itself is guaranteed; what the connectome adds is how those neurons
-  interact and which motor neurons they recruit. DNp09 tips the network into the
-  self-sustained state from ~30 Hz and MDN from ~100 Hz, hence the drive rates; if it
-  happens anyway while you drive, the network is reset and the event is logged.
-- In brain mode, the rates come from the connectome; turning them into joint angles,
-  the tripod walking gait and the jump trajectory are hand-written (the network has no
-  rhythm generator). The dance mode uses no neurons at all.
+- Some stimuli (wind, taste) push the network into a self-sustained state, mostly in the
+  central complex. A safeguard resets the network 1 s after the last stimulus if
+  activity persists, and logs it; while only keys drive the network, it is also reset as
+  soon as it runs away. Short-term synaptic depression prevents that state but blocks
+  almost all transmission downstream.
+- The network has no rhythm generator: the neurons decide to walk, back up, turn, jump,
+  reach or press, and how strongly; the tripod gait, the jump trajectory, the path of a
+  leg toward its target and the kart's physics are hand-written.
 
 ## Project layout
 
@@ -260,11 +294,14 @@ group charts (*Table* shows the numbers), raster, most active neurons and cell t
 | `setup.sh`, `run.sh` | installation and start scripts |
 | `convert.py` | MaleCNS feather files → `malecns_graph.npz` + `neurons.csv` |
 | `engine.py` | connectome loading, LIF simulation (`Stepper`, `simulate`) |
-| `live.py` | continuous simulation, motor channels and spikes for the 3D fly |
-| `dashboard.py` | local HTTP server (standard library) and JSON/binary API |
+| `live.py` | continuous simulation, readout channels, key sets and inputs of the 3D fly |
+| `world.py` | the kart and its road, driven by the leg motor neurons |
+| `flyenv.py` | machine learning API: `FlyBrain`, `DriveEnv`, `DanceEnv` |
+| `examples/` | learning to drive offline, then driving the live page with the policy |
+| `dashboard.py` | local HTTP server (standard library) and JSON/binary API ([API.md](API.md)) |
 | `flysim.py` | command-line simulator |
 | `static/` | dashboard (`index.html`, `app.js`, `results.js`, `charts.js`) |
-| `static/fly.html`, `static/fly/` | 3D fly: model, audio analysis, dance, brain link, 3D brain |
+| `static/fly.html`, `static/fly/` | 3D fly: model, brain link, 3D brain, switchboard, kart, audio analysis |
 | `static/vendor/three/` | three.js 0.185.1, vendored (see `VERSION`) |
 
 ## Troubleshooting

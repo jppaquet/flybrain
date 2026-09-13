@@ -1,4 +1,4 @@
-/* "3D fly" page: the scene is deliberately dark (dance floor),
+/* "3D fly" page: the scene is deliberately dark,
    the panel follows the theme through the tokens of style.css. */
 .fly-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: calc(100vh - 53px); }
 .stage { position: relative; background: #0b0b0d; overflow: hidden; min-height: 320px; }
@@ -92,6 +92,13 @@ code { font-size: 11.5px; background: var(--surface-2); padding: 0 4px; border-r
 }
 .sw-row span.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .sw-row span.busy { outline: 2px solid var(--accent); outline-offset: 1px; }
+.car-gauges { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; }
+.car-gauges div { display: flex; flex-direction: column; padding: 5px 8px; border-radius: 7px; background: var(--surface-2); font-size: 11px; color: var(--muted); }
+.car-gauges b { font-size: 16px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.car-bars { display: grid; grid-template-columns: auto 1fr; gap: 5px 8px; align-items: center; font-size: 11.5px; color: var(--ink-2); margin-bottom: 8px; }
+.cbar { position: relative; height: 7px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 14%, var(--surface-2)); overflow: hidden; }
+.cbar i { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: var(--accent); border-radius: 4px; }
+.cbar.mid::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--ink-2); }
 .evlog {
   position: absolute; right: 16px; bottom: 16px; max-width: 380px; padding: 8px 12px; border-radius: 8px;
   background: rgba(18, 18, 20, 0.72); color: #e8e7e1; font-size: 12px; line-height: 1.5;

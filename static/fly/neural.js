@@ -17,7 +17,7 @@ export class BrainLink {
   reset() {
     this.id = null; this.info = null; this.frames = []; this.next = 0; this.tPlay = null;
     this.S = {}; this.raw = {}; this.cur = null; this.status = null; this.error = null; this.spikes = [];
-    this.peak = {};
+    this.peak = {}; this.kart = null;
   }
   async start(params) {
     this.stop();
@@ -48,13 +48,19 @@ export class BrainLink {
   }
   event(key) { if (this.id != null) fetch("/api/live/event", { method: "POST", body: JSON.stringify({ id: this.id, key }) }); }
   audio(level, hit = false) { if (this.id != null) fetch("/api/live/audio", { method: "POST", body: JSON.stringify({ id: this.id, level, hit }) }); }
-  drive(keys) { if (this.id != null) fetch("/api/live/drive", { method: "POST", body: JSON.stringify({ id: this.id, keys }) }); }
+  drive(keys, keyset = "walk") { if (this.id != null) fetch("/api/live/drive", { method: "POST", body: JSON.stringify({ id: this.id, keys, keyset }) }); }
+  async world(name, reset = false) {
+    if (name == null) this.kart = null;
+    if (this.id == null) return null;
+    const r = await fetch("/api/live/world", { method: "POST", body: JSON.stringify({ id: this.id, world: name, reset }) });
+    return r.json();
+  }
   reach(side) { if (this.id != null) fetch("/api/live/reach", { method: "POST", body: JSON.stringify({ id: this.id, side }) }); }
 
   /* Neurons driven by the current inputs (frame names -> indices from the start info). */
   inputIdx(names) {
     return names.map(n => n.startsWith("ev:") ? this.info.events.find(e => e.key === n.slice(3))?.idx
-                         : n.startsWith("key:") ? this.info.drive.find(d => d.key === n.slice(4))?.idx
+                         : n.startsWith("key:") ? this.info.keysets[n.split(":")[1]]?.find(d => d.key === n.split(":")[2])?.idx
                          : n.startsWith("reach:") ? this.info.reach.find(r => r.side === n.slice(6))?.idx
                          : n.startsWith("audio") ? this.info.audio_idx : null).filter(Boolean);
   }
@@ -74,6 +80,7 @@ export class BrainLink {
       const f = F.shift(); this.cur = f; n++;
       if (f[5] && this.onNote) this.onNote(f[5]);
       if (f[6]) this.spikes.push(b64i32(f[6]));
+      if (f[7]) this.kart = f[7];                                 // kart state (Drive mode)
       const k = 1 - Math.exp(-10 / 30);
       f[1].forEach((r, i) => {
         const key = this.keys[i];

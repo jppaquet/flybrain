@@ -35,20 +35,20 @@
       <button data-cam="top">Top</button>
       <button id="autorot" title="Auto-rotate" aria-label="Auto-rotate">↻</button>
     </div>
-    <div class="evlog" id="evlog" hidden></div>
-    <div class="drop" id="drop" hidden>Drop an audio file to make it dance</div>
+    <div class="evlog" id="evlog"></div>
+    <div class="drop" id="drop" hidden>Drop an audio file: the fly hears it through Johnston's organ</div>
   </div>
 
   <aside class="controls fly-panel" aria-label="Controls">
     <section>
       <div class="sec-head"><h2>Drive</h2></div>
       <div class="seg mode-seg" id="mode-seg" role="group" aria-label="Drive mode">
-        <button data-mode="dance" class="on">Dance</button>
-        <button data-mode="brain">Brain</button>
+        <button data-mode="brain" class="on">Brain</button>
         <button data-mode="keys">Keyboard</button>
         <button data-mode="board">Switches</button>
+        <button data-mode="car">Drive</button>
       </div>
-      <p class="note" id="mode-note">Choreography locked to the sound: no neurons are simulated.</p>
+      <p class="note" id="mode-note">The body follows the descending and motor neurons of the connectome simulation.</p>
     </section>
 
     <section id="keys-sec" hidden>
@@ -60,12 +60,36 @@
       </div>
       <dl class="keymap" id="keymap"></dl>
       <label class="check"><input type="checkbox" id="chase" checked> Chase camera: stays behind the fly</label>
-      <p class="note">Each held key drives the fly's own command descending neurons with spikes, the way
-        experimenters activate them with light in real flies. The body reads the same neurons back from the
-        simulation, plus the nerve cord motor neurons they recruit; a key lights up with the firing of its
-        neurons, not with the key press. Rates stay below the level where the network runs away, and the
-        network is reset if it runs away anyway. Space shows a looming threat to both eyes: the escape
-        pathway fires the jump motor neuron TTMn.</p>
+      <p class="note">Each held key drives, with spikes, neurons presynaptic to the fly's command descending
+        neurons (found by screening their inputs). The body reads the descending neurons, one synapse
+        downstream, and the nerve cord motor neurons they recruit; a key lights up with the firing of those
+        descending neurons, not with the key press. The network is reset if it runs away while you drive.
+        Space shows a looming threat to both eyes: the escape pathway fires the jump motor neuron TTMn.</p>
+    </section>
+
+    <section id="car-sec" hidden>
+      <div class="sec-head"><h2>Drive</h2><span class="hint">arrow keys or WASD · R: back on the road</span></div>
+      <div class="car-gauges">
+        <div>Speed<b id="car-speed">0</b></div>
+        <div>Distance<b id="car-dist">0</b></div>
+        <div>Off centre<b id="car-off">0</b></div>
+      </div>
+      <div class="car-bars">
+        <span>Wheel</span><div class="cbar mid"><i id="car-wheel"></i></div>
+        <span>Accelerator</span><div class="cbar"><i id="car-thr"></i></div>
+        <span>Brake</span><div class="cbar"><i id="car-brk"></i></div>
+      </div>
+      <div class="keypad" id="carpad">
+        <span></span><kbd class="key" data-k="up">↑</kbd><span></span>
+        <kbd class="key" data-k="left">←</kbd><kbd class="key" data-k="down">↓</kbd><kbd class="key" data-k="right">→</kbd>
+      </div>
+      <dl class="keymap" id="carmap"></dl>
+      <div class="row"><button id="car-reset" class="ghost">Back on the road</button></div>
+      <p class="note">The fly stands on the kart, its front legs on the steering wheel and its hind legs on the
+        pedals, and only its motor neurons move the kart: the front legs' coxa promotors turn the wheel, the right
+        hind leg's extensors press the accelerator, the left hind leg's flexors pull the brake. Each key drives the
+        descending neuron that moves one leg most specifically; the kart reads that leg's motor neurons,
+        downstream in the nerve cord. The same kart is available offline for learning (<code>flyenv.DriveEnv</code>).</p>
     </section>
 
     <section id="board-sec" hidden>
@@ -83,7 +107,7 @@
         tethered in front of the console, as in a lab setup.</p>
     </section>
 
-    <section id="brain-sec" hidden>
+    <section id="brain-sec">
       <div class="sec-head"><h2>Brain</h2><span class="hint" id="live-state">stopped</span></div>
       <div class="row">
         <button id="live-start" class="primary">Start simulation</button>
@@ -146,25 +170,11 @@
         <input type="range" id="hold" min="0.1" max="2" step="0.05" value="0.35"></label>
     </section>
 
-    <section id="dance-sec">
-      <div class="sec-head"><h2>Dance</h2></div>
-      <label class="check"><input type="checkbox" id="dance-on" checked> Twerk when there is sound</label>
-      <label class="field"><span class="lab">Intensity <b class="val" id="int-val"></b></span>
-        <input type="range" id="intensity" min="0" max="1.5" step="0.05" value="1"></label>
-      <label class="field">Cadence
-        <select id="cadence">
-          <option value="auto">Auto (from the tempo)</option>
-          <option value="1">1 hit per beat</option>
-          <option value="2">2 hits per beat</option>
-        </select></label>
-      <label class="check"><input type="checkbox" id="song" checked> Courtship song: one wing vibrates on the downbeat</label>
-    </section>
-
     <section>
       <div class="sec-head"><h2>Body</h2><button class="ghost small" id="reset-pose">Reset</button></div>
       <div id="joints" class="joints"></div>
       <p class="note">The legs follow by inverse kinematics: the tarsi stay on the ground.
-        The dance is added to this pose. Console: <code>fly.pose</code>, <code>fly.set("abdPitch", 0.4)</code>.</p>
+        Every mode adds its movement to this pose. Console: <code>fly.pose</code>, <code>fly.set("abdPitch", 0.4)</code>.</p>
     </section>
   </aside>
 </div>

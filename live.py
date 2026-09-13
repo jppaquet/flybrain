@@ -13,13 +13,13 @@ Every BRAIN_EVERY slices, the frame also lists the neurons that fired (for the 3
 """
 import base64, collections, re, threading, time
 import numpy as np
-import engine
+import engine, world
 
 FRAME_MS = 10.0
 BRAIN_EVERY = 4        # one brain frame every 40 ms of simulated time
 BRAIN_CAP = 4000       # neurons sent per brain frame (random sample beyond that)
-RUNAWAY_N = 150        # while only keys drive the network: reset if more neurons than this fire
-RUNAWAY_FRAMES = 30    # per 10 ms on average over 30 frames (key driving: < 60; runaway: 230 to 1,700)
+RUNAWAY_N = 200        # while only keys drive the network: reset if more neurons than this fire
+RUNAWAY_FRAMES = 30    # per 10 ms on average over 30 frames (key driving: < 120; runaway: 230 to 1,700)
 
 LEGS = [("fl", "T1"), ("ml", "T2"), ("hl", "T3")]
 LEG_FUNCS = [  # (key, label, pattern on the motor neuron type)
@@ -45,29 +45,40 @@ EVENTS = [
     dict(key="sound", label="Sound (JO-B)", kind="sens", query=r"^JO-B", field="type", hz=200, ms=500),
     dict(key="wind", label="Wind (JO-C/E)", kind="sens", query=r"^JO-(C|E)", field="type", hz=150, ms=500),
     dict(key="cva", label="cVA odour (ORN DA1)", kind="sens", query=r"^ORN_DA1$", field="type", hz=150, ms=800),
+    # direct activations whose effect is read downstream (giant fiber -> TTMn, pIP10 -> wing
+    # motor neurons). Activating DNp09, MDN, DNa02 or MN9 directly is not offered: the body
+    # would read back the very neurons being driven (see "always through synapses" below)
     dict(key="gf", label="Giant fiber", kind="opto", query=r"^DNp01$", field="type", hz=200, ms=100),
-    dict(key="p09", label="DNp09: walk", kind="opto", query=r"^DNp09$", field="type", hz=150, ms=1500),
-    dict(key="mdn", label="MDN: walk backward", kind="opto", query=r"^MDN$", field="type", hz=150, ms=1500),
-    dict(key="a02L", label="DNa02 left", kind="opto", query=r"^DNa0[12]$", field="type", side="L", hz=150, ms=1000),
-    dict(key="a02R", label="DNa02 right", kind="opto", query=r"^DNa0[12]$", field="type", side="R", hz=150, ms=1000),
     dict(key="pip10", label="pIP10: song", kind="opto", query=r"^pIP10$", field="type", hz=150, ms=1500),
-    dict(key="mn9", label="MN9: proboscis", kind="opto", query=r"^MN9$", field="type", hz=150, ms=800),
 ]
 # Sound from the page -> JO-B (at w_scale 0.5: a graded, bounded response that dies out in
 # ~40 ms). Not JO-A: added to JO-B, it inhibits the output. Not JO-C/E: above ~30 Hz they
 # push the network into the self-sustained state. A background drive that follows the
 # volume, and a short burst on every onset (kick drum): the motor output then follows the beat.
 AUDIO_INPUT = dict(query=r"^JO-B", field="type", hz=30.0, hit_hz=300.0, hit_ms=80.0)
-# Arrow keys -> the fly's own command descending neurons, driven while the key is held
-# ("virtual optogenetics", as with CsChrimson in real flies). Rates stay below the level
-# where the network tips into its self-sustained state (at w_scale 0.5: DNp09 runs away
-# from ~30 Hz, MDN from ~100 Hz; DNa01/02 never do).
-DRIVE = [
-    dict(key="up", label="DNp09: walk forward", query=r"^DNp09$", field="type", hz=25),
-    dict(key="down", label="MDN: walk backward", query=r"^MDN$", field="type", hz=55),
-    dict(key="left", label="DNa01/02 left: turn left", query=r"^DNa0[12]$", field="type", side="L", hz=150),
-    dict(key="right", label="DNa01/02 right: turn right", query=r"^DNa0[12]$", field="type", side="R", hz=150),
-]
+# Held keys -> neurons upstream of what the body reads, so that every command crosses
+# synapses before it moves anything (the page resends held keys every ~100 ms).
+KEYSETS = {
+    # Keyboard mode: the body reads locomotion from DNp09, MDN and DNa01/02, so the keys
+    # drive their strongest clean presynaptic partners (screen of their inputs): at 150 Hz
+    # ICL012m brings DNp09 to ~32 Hz, DNpe023 brings MDN to ~63 Hz and LAL018 brings its
+    # DNa01/02 to ~45 Hz, with at most a few hundred neurons active and no runaway.
+    "walk": [
+        dict(key="up", label="ICL012m → DNp09: walk forward", query=r"^ICL012m$", field="type", hz=150),
+        dict(key="down", label="DNpe023 → MDN: walk backward", query=r"^DNpe023$", field="type", hz=150),
+        dict(key="left", label="LAL018 left → DNa01/02 left: turn left", query=r"^LAL018$", field="type", side="L", hz=150),
+        dict(key="right", label="LAL018 right → DNa01/02 right: turn right", query=r"^LAL018$", field="type", side="R", hz=150),
+    ],
+    # Drive mode: the kart reads leg motor neurons (world.CONTROLS), so the keys drive the
+    # descending neurons that move each leg most specifically (screens of all DN types).
+    # No DN extends the left hind leg cleanly: the brake is a lever the leg pulls (flexors).
+    "car": [
+        dict(key="up", label="DNg16 right → right hind leg extends: accelerator", query=r"^DNg16$", field="type", side="R", hz=150),
+        dict(key="down", label="DNpe008 left → left hind leg flexes: brake", query=r"^DNpe008$", field="type", side="L", hz=150),
+        dict(key="left", label="DNg12_e right → right front leg pushes the rim: turn left", query=r"^DNg12_e$", field="type", side="R", hz=150),
+        dict(key="right", label="DNg12_e left → left front leg pushes the rim: turn right", query=r"^DNg12_e$", field="type", side="L", hz=150),
+    ],
+}
 # Switchboard: a number key makes the fly press a switch with a front leg. The key drives
 # DNg12_e on that side: in a screen of all 472 left DN types, the most specific front-leg
 # descending neuron (alone it recruits ~20-30 neurons, mostly the coxa promotors, which
@@ -96,7 +107,6 @@ def channels(C):
     out = []
     def add(key, label, group, idx):
         if len(idx): out.append(dict(key=key, label=label, group=group, idx=np.asarray(idx, np.int32)))
-    add("jo", "JO-B (sound)", "hearing", select(C, AUDIO_INPUT["query"], AUDIO_INPUT["field"]))
     add("esc", "DNp02/06/11 (escape)", "hearing", select(C, r"^DNp(02|06|11)$"))
     add("fwd", "DNp09 (walking)", "locomotion", select(C, r"^DNp09$"))
     add("back", "MDN (backward)", "locomotion", select(C, r"^MDN$"))
@@ -126,6 +136,8 @@ class Session:
         self.C, self.q = C, engine.resolve_params(params)
         self.sim = engine.Stepper(C, self.q)
         self.chans = channels(C)
+        self.keys = [c["key"] for c in self.chans]
+        self.driver = world.Driver() if params.get("world") == "kart" else None
         self.frames, self.base = [], 0
         self.inputs = {}                    # name -> dict(idx, hz, until)
         self.lock, self.stop_ev = threading.Lock(), threading.Event()
@@ -138,6 +150,15 @@ class Session:
             if hz <= 0 or not len(idx): self.inputs.pop(name, None); return
             until = None if ms is None else self.sim.t_ms + ms
             self.inputs[name] = dict(idx=idx, hz=float(hz), until=until)
+
+    def set_world(self, name, reset=False):
+        """name "kart": the legs' motor neurons drive world.Driver; None: no world."""
+        with self.lock:
+            if name == "kart":
+                if self.driver is None: self.driver = world.Driver()
+                elif reset: self.driver.reset()
+            else:
+                self.driver = None
 
     def _run(self):
         n = max(1, int(round(FRAME_MS / self.q["dt"])))
@@ -157,8 +178,14 @@ class Session:
                 t = time.time()
                 fired = self.sim.step(n, drive)
                 counts = np.bincount(fired, minlength=self.C.N)
+                # always through synapses: the body never reads a neuron that a stimulus
+                # drives directly, only what the network makes of it downstream
+                read = counts
+                if drive:
+                    read = counts.copy()
+                    for idx, _ in drive: read[idx] = 0
                 k = 1000.0 / FRAME_MS
-                rates = [round(float(counts[c["idx"]].sum()) * k / len(c["idx"]), 1) for c in self.chans]
+                rates = [round(float(read[c["idx"]].sum()) * k / len(c["idx"]), 1) for c in self.chans]
                 nact, note = int(np.count_nonzero(counts)), None
                 # safeguard: the uniform LIF sometimes falls into a self-sustained state
                 # (mostly in the central complex) that never dies out on its own
@@ -179,7 +206,11 @@ class Session:
                     u = np.unique(np.concatenate(acc)); acc = []
                     if len(u) > BRAIN_CAP: u = np.sort(rng.choice(u, BRAIN_CAP, replace=False))
                     brain = base64.b64encode(u.astype("<i4").tobytes()).decode()
-                frame = [round(self.sim.t_ms, 1), rates, int(len(fired)), nact, names, note, brain]
+                kart, drv = None, self.driver
+                if drv is not None:                                  # the legs drive the kart
+                    drv.frame(dict(zip(self.keys, rates)), FRAME_MS)
+                    kart = drv.kart.frame()
+                frame = [round(self.sim.t_ms, 1), rates, int(len(fired)), nact, names, note, brain, kart]
                 with self.lock:
                     self.frames.append(frame)
                     if len(self.frames) > 6000:
@@ -210,7 +241,7 @@ class Live:
     """One session at a time (local server, single user)."""
     def __init__(self, C):
         self.C, self.session, self.sid = C, None, 0
-        self._ev, self._jo, self._drive, self._reach = None, None, None, None
+        self._ev, self._jo, self._reach, self._keys, self._api = None, None, None, {}, {}
 
     def event_idx(self):
         """Neurons driven by each event (regex over 165k neurons: computed once)."""
@@ -218,10 +249,10 @@ class Live:
             self._ev = {e["key"]: select(self.C, e["query"], e["field"], e.get("side")) for e in EVENTS}
         return self._ev
 
-    def drive_idx(self):
-        if self._drive is None:
-            self._drive = {d["key"]: select(self.C, d["query"], d["field"], d.get("side")) for d in DRIVE}
-        return self._drive
+    def keyset_idx(self, name):
+        if name not in self._keys:
+            self._keys[name] = {d["key"]: select(self.C, d["query"], d["field"], d.get("side")) for d in KEYSETS[name]}
+        return self._keys[name]
 
     def reach_idx(self):
         if self._reach is None:
@@ -236,18 +267,27 @@ class Live:
         if self.session: self.session.stop()
         self.sid += 1
         self.session = Session(self.C, params)
-        ev, dr, rc = self.event_idx(), self.drive_idx(), self.reach_idx()
+        ev, rc = self.event_idx(), self.reach_idx()
         return dict(id=self.sid, frame_ms=FRAME_MS, brain_ms=FRAME_MS * BRAIN_EVERY, params=self.session.q,
                     channels=[dict(key=c["key"], label=c["label"], group=c["group"], n=int(len(c["idx"])))
                               for c in self.session.chans],
                     events=[dict(e, n=int(len(ev[e["key"]])), idx=ev[e["key"]].tolist()) for e in EVENTS],
-                    drive=[dict(d, n=int(len(dr[d["key"]])), idx=dr[d["key"]].tolist()) for d in DRIVE],
+                    keysets={name: [dict(d, n=int(len(self.keyset_idx(name)[d["key"]])),
+                                         idx=self.keyset_idx(name)[d["key"]].tolist()) for d in ks]
+                             for name, ks in KEYSETS.items()},
+                    controls=world.CONTROLS, track=world.Track().to_dict(), kart_keys=world.Kart.FRAME_KEYS,
                     reach=[dict(r, n=int(len(rc[r["side"]])), idx=rc[r["side"]].tolist()) for r in REACH],
                     audio_idx=self.audio_idx().tolist())
 
     def get(self, sid):
         if self.session is None or int(sid) != self.sid: raise KeyError("unknown or replaced session")
         return self.session
+
+    def current(self):
+        """The running session, so that a script can join the one the page started."""
+        s = self.session
+        return dict(id=self.sid if s else None, alive=bool(s and s.thread.is_alive() and not s.stop_ev.is_set()),
+                    world="kart" if s and s.driver is not None else None, frame_ms=FRAME_MS)
 
     def event(self, sid, key):
         e = next(e for e in EVENTS if e["key"] == key)
@@ -260,13 +300,28 @@ class Live:
         if hit: s.stimulate("audio:hit", idx, A["hit_hz"], A["hit_ms"])
         else: s.stimulate("audio", idx, A["hz"] * level, 400)
 
-    def drive(self, sid, keys):
-        """Arrow keys held on the page -> command descending neurons. The page resends the
+    def drive(self, sid, keys, keyset="walk"):
+        """Keys held on the page -> the neurons of KEYSETS[keyset]. The page resends the
         held keys every ~100 ms; each input expires after 300 ms, so a page that goes away
         releases its keys by itself."""
-        s, idx = self.get(sid), self.drive_idx()
-        for d in DRIVE:
-            s.stimulate(f"key:{d['key']}", idx[d["key"]], d["hz"] if d["key"] in keys else 0, 300)
+        s, idx = self.get(sid), self.keyset_idx(keyset)
+        for d in KEYSETS[keyset]:
+            s.stimulate(f"key:{keyset}:{d['key']}", idx[d["key"]], d["hz"] if d["key"] in keys else 0, 300)
+
+    def world(self, sid, name, reset=False):
+        """Turns the kart on ("kart") or off (None) in the running session."""
+        self.get(sid).set_world(name, reset)
+        return dict(world=name, track=world.Track().to_dict() if name == "kart" else None,
+                    kart_keys=world.Kart.FRAME_KEYS)
+
+    def stim(self, sid, name, query, field="type", side=None, hz=0.0, ms=None):
+        """Any group of neurons, for scripts and agents: Poisson drive at `hz` for `ms`
+        (None: until set again; hz 0 stops it). The body never reads the driven neurons."""
+        s, k = self.get(sid), (query, field, side)
+        if k not in self._api: self._api[k] = select(self.C, query, field, side)
+        idx = self._api[k]
+        s.stimulate(f"api:{name}", idx, float(hz), None if ms is None else float(ms))
+        return dict(name=name, n=int(len(idx)))
 
     def reach(self, sid, side):
         """Number key on the switchboard -> a burst to the front-leg descending neuron of that side."""
