@@ -600,6 +600,9 @@ $("#live-start").addEventListener("click", () => {
    over HTTP, or a training run that flyenv streams (Viewer). It checks every 2 s. */
 async function follow(s) {
   const info = await brain.attach(s.id);
+  if (video?.auto) stopVideo();                                // one video per watched run
+  if (info.remote && $("#vid-auto").checked) startVideo(info.remote, true);
+  if (info.remote) listRecordings();
   buildBrainUI(info);
   brain3d.clear(); stimNames = "";
   $("#live-start").textContent = "Stop";
@@ -616,8 +619,61 @@ async function checkSession() {
   }
   $("#watch").hidden = !brain.remote;
   $("#watch-label").textContent = brain.remote ? `“${brain.info.remote}”` : "";
+  if (video?.auto && (!brain.remote || brain.status?.alive === false)) stopVideo();   // the run is over
 }
 setInterval(checkSession, 2000);
+
+/* ----------------------------------------------------------- recordings */
+async function listRecordings() {
+  try {
+    const list = await (await fetch("/api/recordings")).json(), keep = $("#rec-list").value;
+    $("#rec-list").replaceChildren(...(list.length ? list.map(r => {
+      const o = el("option", null, `${(r.started || "").replace("T", " ")} · ${r.label} · ${Math.max(1, Math.round(r.bytes / 1e3))} kB`);
+      o.value = r.name; return o;
+    }) : [el("option", null, "no recording yet")]));
+    if (keep && list.some(r => r.name === keep)) $("#rec-list").value = keep;
+  } catch { /* server restarting */ }
+}
+$("#rec-refresh").addEventListener("click", listRecordings);
+$("#rec-replay").addEventListener("click", async () => {
+  const name = $("#rec-list").value;
+  if (!name || !name.endsWith(".jsonl.gz")) return;
+  const r = await fetch("/api/recordings/replay", { method: "POST", body: JSON.stringify({ name }) });
+  const d = await r.json();
+  if (!r.ok) return status(`Replay failed: ${d.error}`, true);
+  dismissed = null; checkSession();                           // followed like any streamed run
+});
+
+/* ---------------------------------------------------------------- video */
+/* The 3D view (the WebGL canvas) filmed with MediaRecorder; the browser downloads a WebM
+   file when the recording stops. auto: started for a watched run, stopped when it ends. */
+let video = null;
+const slug = s => String(s || "flybrain").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+function startVideo(label, auto = false) {
+  if (video || typeof MediaRecorder === "undefined") return;
+  const mime = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find(m => MediaRecorder.isTypeSupported(m));
+  const mr = new MediaRecorder(canvas.captureStream(30), mime ? { mimeType: mime, videoBitsPerSecond: 6e6 } : undefined);
+  const chunks = [], stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  mr.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  mr.onstop = () => {
+    const blob = new Blob(chunks, { type: "video/webm" }), a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = `flybrain-${slug(label)}-${stamp}.webm`;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    window.fly.lastVideo = blob;
+    status(`Video saved: ${a.download} (${(blob.size / 1e6).toFixed(1)} MB)`);
+  };
+  mr.start(1000);
+  video = { mr, label, auto, t0: performance.now() };
+  $("#vid-rec").textContent = "■ Stop video"; $("#vid-rec").classList.add("on");
+}
+function stopVideo() {
+  if (!video) return;
+  video.mr.stop(); video = null;
+  $("#vid-rec").textContent = "● Record video"; $("#vid-rec").classList.remove("on"); $("#vid-state").textContent = "";
+}
+$("#vid-rec").addEventListener("click", () => (video ? stopVideo() : startVideo(brain.info?.remote || mode)));
+setInterval(() => { if (video) $("#vid-state").textContent = `recording · ${Math.round((performance.now() - video.t0) / 1000)} s`; }, 500);
 $("#live-zero").addEventListener("click", () => startLive("Network reset to rest"));
 $("#live-reset").addEventListener("click", () => { body.reset(); });
 
@@ -625,6 +681,7 @@ setMode("brain");
 requestAnimationFrame(frame);
 status("Ready · start the simulation");
 checkSession();                                              // a training run may already be streaming
+listRecordings();
 
 window.fly = {
   get pose() { return { ...base }; },

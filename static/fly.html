@@ -150,6 +150,17 @@
         into angles, the tripod gait and the jump trajectory.</p>
     </section>
 
+    <section id="rec-sec">
+      <div class="sec-head"><h2>Recordings</h2><button class="ghost small" id="rec-refresh">Refresh</button></div>
+      <div class="row rec-row"><select id="rec-list" aria-label="Recorded runs"></select><button id="rec-replay" class="ghost">Replay</button></div>
+      <p class="note">Every run streamed by flyenv (<code>viewer=True</code>, <code>--watch</code>) is kept in
+        <code>runs/recordings</code>. <em>Replay</em> plays it again here, with any camera and the 3D brain.</p>
+      <div class="row"><button id="vid-rec" class="ghost">● Record video</button><span class="hint" id="vid-state"></span></div>
+      <label class="check"><input type="checkbox" id="vid-auto"> Record a video of every watched run or replay</label>
+      <p class="note">The video (WebM, the 3D view only) is downloaded by the browser when the recording stops;
+        keep this page open and visible while it records.</p>
+    </section>
+
     <section>
       <div class="sec-head"><h2>Sound</h2><span class="hint" id="src-label">no source</span></div>
       <div class="src-btns">

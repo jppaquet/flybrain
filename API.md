@@ -71,6 +71,12 @@ info["kart"], info["distance"], info["motor"], info["n_active"]
   width; −5 and `terminated` when the kart leaves the road.
 - Speed: one 50 ms step takes about 40 ms of CPU on a laptop.
 
+Helpers: `flyenv.paired_action(u, max_hz=150)` turns two commands in −1..1 (speed: +
+accelerator / − brake; steering: + right / − left) into the four rates, never driving two
+opposite inputs together; `flyenv.load_policy(path)` loads a policy saved by the examples
+as a function `observation -> rates`. Training runs, their outputs and improvement
+leads: [TRAINING.md](TRAINING.md).
+
 ### DanceEnv — learn to dance
 
 The fly hears a metronome through its auditory neurons (JO-B gets a burst on every beat,
@@ -122,10 +128,20 @@ server back; streaming then stops until `viewer.reconnect()`.
 The page follows any session the same way — also one that a script starts or drives over
 HTTP.
 
+**Recordings.** The server keeps every streamed run in
+`runs/recordings/<date-time>-<label>.jsonl.gz` (gzip JSON lines: a header
+`{label, world, frame_ms, started}`, then the frames as they arrived, and `{"groups": …}`
+lines; a few hundred kB for a 10 s episode). The page's *Recordings* section replays one
+with any camera; *● Record video* films the 3D view to a WebM file, and *Record a video of
+every watched run or replay* makes one file per run (one per ES generation with `--watch`).
+Read a recording from Python with `live.read_recording(name)` → `(header, groups, frames)`.
+
 ### Running a trained policy on the live page
 
-`examples/drive_hillclimb.py` trains a linear policy offline and saves it as JSON;
-`examples/live_policy.py` joins the page's session over HTTP and drives the kart with it
+`examples/drive_baseline.py` is a hand-written feedback controller over the same inputs
+(the score to beat); `examples/drive_es.py` trains a linear policy with a parallel
+evolution strategy and `examples/drive_hillclimb.py` with plain hill climbing, both saving
+it as JSON; `examples/live_policy.py` joins the page's session over HTTP and drives the kart with it
 (open `/fly`, choose Drive, run the script). `flyenv.drive_observation(state)` turns a
 live kart frame into the same observation vector as `DriveEnv`.
 
@@ -142,6 +158,8 @@ its frames for 20 s.
 | `GET /api/live/info?id=` | | the start information of the current session, with `groups` (inputs named by scripts) |
 | `POST /api/view/start` | `{label, world}` | another process will stream frames: a `remote` session becomes current; answers its `id` |
 | `POST /api/view/push` | `{id, frames, groups}` | frames in the format below, and new input groups `{name: [indices]}` |
+| `GET /api/recordings` | | the recorded streamed runs: `[{name, label, world, started, bytes}]`, newest first |
+| `POST /api/recordings/replay` | `{name}` | plays a recording again as a new streamed session (label `Replay · …`), at its own pace |
 | `GET /api/live/frames?id=&since=` | | frames since index `since` (up to 300), and `next` |
 | `POST /api/live/stim` | `{id, name, query, field, side, hz, ms}` | drives any group (`ms` omitted: until `hz` 0); answers `{name, n}` |
 | `POST /api/live/event` | `{id, key}` | a stimulus button (`loomL`, `loomR`, `loom`, `sugar`, `sound`, `wind`, `cva`, `gf`, `pip10`) |

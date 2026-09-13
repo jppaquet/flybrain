@@ -31,7 +31,7 @@ def main():
     ap.add_argument("--url", default="http://127.0.0.1:8765")
     a = ap.parse_args()
     p = json.load(open(a.policy))
-    W, high, U = np.array(p["W"]), float(p["max_hz"]), a.url.rstrip("/")
+    pol, U = flyenv.load_policy(a.policy), a.url.rstrip("/")
 
     cur = call(f"{U}/api/live/session")
     if cur["alive"]:
@@ -49,7 +49,7 @@ def main():
             kart = next((f[7] for f in reversed(d["frames"]) if len(f) > 7 and f[7]), None)
             if kart:
                 s = dict(zip(keys, kart))
-                rates = high / (1.0 + np.exp(-(W @ np.append(flyenv.drive_observation(s), 1.0))))
+                rates = pol(flyenv.drive_observation(s))
                 for spec, hz in zip(p["inputs"], rates):
                     call(f"{U}/api/live/stim", dict(id=sid, name=spec["name"], query=spec["query"], field=spec["field"],
                                                     side=spec["side"], hz=float(hz), ms=150))

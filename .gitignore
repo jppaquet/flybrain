@@ -5,6 +5,11 @@ neurons.csv
 meta_cache.npz
 last_run.npz
 
+# Training runs (examples/drive_es.py) and saved policies
+runs/
+drive_policy.json
+tests/out/
+
 # Python environment
 .venv/
 venv/

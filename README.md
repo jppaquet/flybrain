@@ -148,9 +148,21 @@ obs, reward, terminated, truncated, info = env.step(np.array([150, 0, 0, 0]))
   example), every simulated frame is streamed to the running server, and the 3D page
   follows it by itself — the fly on its kart, its 3D brain, the gauges and the episode
   notes, live, while your code trains in another process.
-- `examples/drive_hillclimb.py` learns a linear driving policy by hill climbing and saves
-  it; `examples/live_policy.py` then drives the kart of the live 3D page with it, over
+- `examples/drive_baseline.py` is a hand-written reference driver: a feedback controller
+  that sets the rates of the same four inputs from the kart's state, and laps the circle
+  (about 1.5 laps in 20 s, return ~200–230) — the score to beat.
+- `examples/drive_es.py` learns from scratch with an evolution strategy, episodes run in
+  parallel worker processes (~1.5 GB of RAM each); `--watch` shows the mean policy of
+  every generation on `/fly`. `examples/drive_hillclimb.py` is the minimal version.
+- `examples/live_policy.py` drives the kart of the live 3D page with a saved policy, over
   HTTP (open `/fly`, choose Drive, run the script).
+- **Keep the runs**: the server records every streamed run in `runs/recordings/`; the 3D
+  page's *Recordings* section replays them, and *● Record video* films the 3D view to a
+  WebM file — automatically for every watched run if you tick the option.
+- `examples/drive_eval.py` compares saved policies and the baseline on the same seeds.
+  **[TRAINING.md](TRAINING.md)** explains how to reproduce a training run (each run saves
+  its configuration, a per-generation log and its policies in `runs/`), what can be
+  changed, the results so far, and leads for improvement.
 - The page always renders the server's current session: its own, one a script started
   over HTTP, or a streamed training run ("Watching …"; its keys are off, *Start
   simulation* takes the server back).
@@ -304,12 +316,25 @@ group charts (*Table* shows the numbers), raster, most active neurons and cell t
 | `live.py` | continuous simulation, readout channels, key sets and inputs of the 3D fly |
 | `world.py` | the kart and its road, driven by the leg motor neurons |
 | `flyenv.py` | machine learning API: `FlyBrain`, `DriveEnv`, `DanceEnv` |
-| `examples/` | learning to drive offline, then driving the live page with the policy |
+| `examples/` | a reference driver, learning to drive (evolution strategy, hill climbing), driving the live page with a policy |
+| `tests/` | `smoke.py` (model, flyenv, HTTP API, recordings) and `e2e.mjs` (the 3D page in headless Chrome) |
+| `.claude/skills/` | Claude Code skills: `flybrain-train` (launch, watch and evaluate a training run), `flybrain-test` (run the tests) |
 | `dashboard.py` | local HTTP server (standard library) and JSON/binary API ([API.md](API.md)) |
 | `flysim.py` | command-line simulator |
 | `static/` | dashboard (`index.html`, `app.js`, `results.js`, `charts.js`) |
 | `static/fly.html`, `static/fly/` | 3D fly: model, brain link, 3D brain, switchboard, kart, audio analysis |
 | `static/vendor/three/` | three.js 0.185.1, vendored (see `VERSION`) |
+
+## Tests
+
+```sh
+.venv/bin/python tests/smoke.py   # ~1 min: model, "always through synapses", flyenv, HTTP API, recordings
+node tests/e2e.mjs                # ~2 min: every mode of the 3D page in headless Chrome (Node ≥ 22)
+```
+
+Both start their own server on a spare port. With Claude Code, the `flybrain-test` skill
+runs them (plus a syntax check of every file) and looks at the screenshots;
+`flybrain-train` launches, watches and evaluates a training run.
 
 ## Troubleshooting
 

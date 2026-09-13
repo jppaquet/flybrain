@@ -11,9 +11,11 @@ such as sound -> Johnston's organ). For each slice we compute the firing rate of
     translated directly into posture.
 Every BRAIN_EVERY slices, the frame also lists the neurons that fired (for the 3D brain).
 """
-import base64, collections, re, threading, time
+import base64, collections, gzip, json, os, re, threading, time
 import numpy as np
 import engine, world
+
+RECORD_DIR = os.path.join(engine.HERE, "runs", "recordings")   # every streamed run is kept here
 
 FRAME_MS = 10.0
 BRAIN_EVERY = 4        # one brain frame every 40 ms of simulated time
@@ -246,29 +248,91 @@ class Session:
         return "kart" if self.driver is not None else None
 
 
+class Recorder:
+    """Keeps a streamed run as runs/recordings/<date-time>-<label>.jsonl.gz: a header line,
+    then the frames as they arrived (and {"groups": ...} lines for the input groups), so
+    that the page can replay it later - and film it. Flushed on every push, so a file being
+    written, or cut short, is still readable."""
+    def __init__(self, label, world_name):
+        os.makedirs(RECORD_DIR, exist_ok=True)
+        slug = re.sub(r"[^A-Za-z0-9]+", "-", label).strip("-")[:60] or "run"
+        base = f"{time.strftime('%Y%m%d-%H%M%S')}-{slug}"
+        self.name, k = f"{base}.jsonl.gz", 1
+        while os.path.exists(os.path.join(RECORD_DIR, self.name)):
+            k += 1; self.name = f"{base}-{k}.jsonl.gz"
+        self.f = gzip.open(os.path.join(RECORD_DIR, self.name), "wt", encoding="utf-8")
+        self.f.write(json.dumps(dict(label=label, world=world_name, frame_ms=FRAME_MS,
+                                     started=time.strftime("%Y-%m-%dT%H:%M:%S"))) + "\n")
+
+    def write(self, frames, groups):
+        if groups: self.f.write(json.dumps(dict(groups=groups), separators=(",", ":")) + "\n")
+        for fr in frames: self.f.write(json.dumps(fr, separators=(",", ":")) + "\n")
+        self.f.flush()
+
+    def close(self):
+        self.f.close()
+
+
+def read_recording(name):
+    """-> (header, groups, frames) of a recording; tolerant of a file still being written."""
+    path = os.path.join(RECORD_DIR, os.path.basename(str(name)))
+    if not path.endswith(".jsonl.gz") or not os.path.isfile(path): raise KeyError(f"unknown recording {name}")
+    head, groups, frames = {}, {}, []
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            for i, line in enumerate(f):
+                x = json.loads(line)
+                if i == 0: head = x
+                elif isinstance(x, dict): groups.update(x.get("groups", {}))
+                else: frames.append(x)
+    except (EOFError, OSError, ValueError):
+        pass                                       # still being written, or cut short: keep what was read
+    return head, groups, frames
+
+
+def list_recordings(limit=300):
+    out = []
+    if not os.path.isdir(RECORD_DIR): return out
+    for fn in sorted(os.listdir(RECORD_DIR), reverse=True):
+        if not fn.endswith(".jsonl.gz"): continue
+        p = os.path.join(RECORD_DIR, fn)
+        try:
+            with gzip.open(p, "rt", encoding="utf-8") as f: head = json.loads(f.readline())
+        except (EOFError, OSError, ValueError):
+            head = {}
+        out.append(dict(name=fn, label=head.get("label", fn), world=head.get("world"),
+                        started=head.get("started"), bytes=os.path.getsize(p)))
+        if len(out) >= limit: break
+    return out
+
+
 class Remote:
     """A session simulated in another process (flyenv with a Viewer), which streams its
     frames here in the same format: the page renders them exactly like its own simulation.
-    Nothing is simulated in the server, and it takes no input (they belong to the process)."""
+    Nothing is simulated in the server, and it takes no input (they belong to the process).
+    Streamed runs are recorded (Recorder); replays are not."""
     kind = "remote"
 
-    def __init__(self, label, world_name=None):
+    def __init__(self, label, world_name=None, record=True):
         self.label, self.world_name, self.groups = label, world_name, {}
         self.frames, self.base, self.t_ms = [], 0, 0.0
         self.lock, self.last_push, self.stopped = threading.Lock(), time.time(), False
+        self.rec = Recorder(label, world_name) if record else None
 
     @property
     def alive(self):
         return not self.stopped and time.time() - self.last_push < 15
 
     def push(self, frames, groups):
+        frames = [f for f in frames if isinstance(f, list) and len(f) >= 8]
         with self.lock:
             self.groups.update(groups)
-            self.frames.extend(f for f in frames if isinstance(f, list) and len(f) >= 8)
+            self.frames.extend(frames)
             if self.frames: self.t_ms = self.frames[-1][0]
             if len(self.frames) > 6000:
                 self.frames = self.frames[3000:]; self.base += 3000
             self.last_push = time.time()
+            if self.rec: self.rec.write(frames, groups)
 
     def read(self, since, limit=300):
         with self.lock:
@@ -283,7 +347,9 @@ class Remote:
     set_world = stimulate
 
     def stop(self):
-        self.stopped = True
+        with self.lock:
+            self.stopped = True
+            if self.rec: self.rec.close(); self.rec = None
 
 
 class Live:
@@ -333,14 +399,36 @@ class Live:
         self.info = self._info(params=self.session.q, remote=None, world=self.session.world_name)
         return self.info
 
-    def remote_start(self, label, world_name=None):
+    def remote_start(self, label, world_name=None, record=True):
         """Another process (flyenv's Viewer) streams its own simulation: it becomes the
-        current session, which the page follows."""
+        current session, which the page follows, and it is recorded."""
         if self.session: self.session.stop()
         self.sid += 1
-        self.session = Remote(label, world_name)
+        self.session = Remote(label, world_name, record)
         self.info = self._info(params=None, remote=label, world=world_name)
-        return self.info
+        return dict(self.info, recording=self.session.rec.name if self.session.rec else None)
+
+    def recordings(self):
+        return list_recordings()
+
+    def replay(self, name):
+        """Plays a recording again, at its own pace, as a new streamed session: the page
+        follows it like a live run (and can film it)."""
+        head, groups, frames = read_recording(name)
+        if not frames: raise KeyError(f"{name}: no frame recorded")
+        info = self.remote_start(f"Replay · {head.get('label', name)}", head.get("world"), record=False)
+        s = self.session
+        s.push([], groups)
+        threading.Thread(target=self._play, args=(s, frames), daemon=True).start()
+        return info
+
+    def _play(self, s, frames):
+        t0, first = time.time(), frames[0][0]
+        for i in range(0, len(frames), 5):                     # 50 ms of frames at a time
+            if s.stopped: return                               # replaced by another session
+            ahead = (frames[i][0] - first) / 1000.0 - (time.time() - t0)
+            if ahead > 0: time.sleep(ahead)
+            s.push(frames[i:i + 5], {})
 
     def push(self, sid, frames, groups):
         s = self.get(sid)

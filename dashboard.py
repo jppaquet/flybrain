@@ -205,6 +205,8 @@ class Handler(BaseHTTPRequestHandler):
                                              qs.get("field", ["any"])[0]))
             if p == "/api/live/session":
                 return self.send(200, self.live.current())
+            if p == "/api/recordings":
+                return self.send(200, self.live.recordings())
             if p == "/api/live/info":
                 try: return self.send(200, self.live.info_of(qs.get("id", ["0"])[0]))
                 except KeyError as e: return self.send(409, {"error": str(e)})
@@ -241,6 +243,9 @@ class Handler(BaseHTTPRequestHandler):
             # another process (flyenv's Viewer) streams its frames: the page renders them
             if p == "/api/view/start":
                 return self.send(200, self.live.remote_start(str(body.get("label") or "remote"), body.get("world")))
+            if p == "/api/recordings/replay":
+                try: return self.send(200, self.live.replay(body["name"]))
+                except KeyError as e: return self.send(404, {"error": str(e)})
             if p == "/api/view/push":
                 try: return self.send(200, self.live.push(body["id"], body.get("frames") or [], body.get("groups") or {}))
                 except KeyError as e: return self.send(409, {"error": str(e)})

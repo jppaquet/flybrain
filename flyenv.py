@@ -60,11 +60,11 @@ class Viewer:
     realtime=True slows the simulation down to real time, to watch a policy calmly."""
     BRAIN_EVERY, BRAIN_CAP = live.BRAIN_EVERY, live.BRAIN_CAP
 
-    def __init__(self, url="http://127.0.0.1:8765", label="flyenv", world=None, realtime=False):
-        self.url, self.label, self.world, self.realtime = url.rstrip("/"), label, world, realtime
+    def __init__(self, url="http://127.0.0.1:8765", label="flyenv", world=None, realtime=False, quiet=False):
+        self.url, self.label, self.world, self.realtime, self.quiet = url.rstrip("/"), label, world, realtime, quiet
         self.id, self.t_ms, self.acc, self.notes, self.wall0 = None, 0.0, [], [], None
         self.groups, self.pending = {}, {}             # input groups (name -> indices), and those to send
-        self.q, self.active, self.warned = queue.Queue(maxsize=3000), True, False
+        self.q, self.active, self.warned, self.busy = queue.Queue(maxsize=3000), True, False, False
         threading.Thread(target=self._run, daemon=True).start()
 
     def note(self, text):
@@ -74,6 +74,12 @@ class Viewer:
     def reconnect(self):
         """Resume streaming in a new session after the server was taken over."""
         self.id, self.active = None, True
+
+    def flush(self, timeout=3.0):
+        """Waits until the frames and notes already produced have left (end of a script)."""
+        end = time.time() + timeout
+        while (not self.q.empty() or self.notes or self.busy) and self.active and time.time() < end:
+            time.sleep(0.05)
 
     def frame(self, rates, spikes, inputs, kart=None, groups=None):
         """One 10 ms frame: channel rates (list, live.channels order, driven neurons masked),
@@ -110,17 +116,18 @@ class Viewer:
         last = None
         while True:
             try:
-                batch = [self.q.get(timeout=0.5)]
+                batch = [self.q.get(timeout=0.3)]
             except queue.Empty:                        # idle (e.g. an episode just ended): pending notes
                 if not (self.notes and last and self.active): continue
                 self.t_ms += live.FRAME_MS             # ride on a copy of the last frame
                 batch = [[round(self.t_ms, 1)] + last[1:5] + [self.notes.pop(0), None] + last[7:]]
+            self.busy = True
             time.sleep(0.1)                            # ~10 requests per second at most
             while True:
                 try: batch.append(self.q.get_nowait())
                 except queue.Empty: break
             last = batch[-1]
-            if not self.active: continue
+            if not self.active: self.busy = False; continue
             try:
                 if self.id is None:
                     self.id = self._post("/api/view/start", dict(label=self.label, world=self.world))["id"]
@@ -130,13 +137,16 @@ class Viewer:
             except urllib.error.HTTPError as e:
                 if e.code == 409:
                     self.active = False
-                    print("flyenv viewer: the server's session was taken over; streaming stopped "
-                          "(viewer.reconnect() resumes)", flush=True)
+                    if not self.quiet:
+                        print("flyenv viewer: the server's session was taken over; streaming stopped "
+                              "(viewer.reconnect() resumes)", flush=True)
             except Exception as e:
-                if not self.warned:
+                if not self.warned and not self.quiet:
                     print(f"flyenv viewer: {self.url} unreachable ({e}); frames are dropped", flush=True)
                     self.warned = True
                 time.sleep(2)
+            finally:
+                self.busy = False
 
 
 def _viewer(v, label, world_name):
@@ -217,6 +227,26 @@ def drive_observation(s, track=None):
                      s["throttle"], s["brake"], s["push"]], np.float32)
 
 
+def paired_action(u, max_hz=150.0):
+    """Two commands in -1..1 -> the four DriveEnv rates [accelerator, brake, wheel left,
+    wheel right]: u[0] speed (+ accelerator, - brake), u[1] steering (+ right, - left).
+    Opposite inputs are never driven together, as with the page's keys: they cancel out,
+    and both DNg12_e at once run the network away. 150 Hz is the rate of the Drive keys."""
+    s, w = float(np.clip(u[0], -1, 1)), float(np.clip(u[1], -1, 1))
+    return max_hz * np.array([max(s, 0.0), max(-s, 0.0), max(-w, 0.0), max(w, 0.0)])
+
+
+def load_policy(path):
+    """A driving policy saved as JSON -> function(observation) -> the four DriveEnv rates.
+    kind "paired" (examples/drive_es.py): tanh(W @ [obs, 1]) -> paired_action; otherwise
+    (examples/drive_hillclimb.py): max_hz x sigmoid(W @ [obs, 1])."""
+    with open(path) as f: p = json.load(f)
+    W, high = np.array(p["W"], dtype=float), float(p.get("max_hz", 250.0))
+    if p.get("kind") == "paired":
+        return lambda obs: paired_action(np.tanh(W @ np.append(obs, 1.0)), high)
+    return lambda obs: high / (1.0 + np.exp(-(W @ np.append(obs, 1.0))))
+
+
 def _inputs(brain, specs):
     return [brain.group(s["query"], s.get("field", "type"), s.get("side"), s.get("name") or s.get("label")) for s in specs]
 
@@ -253,7 +283,7 @@ class DriveEnv:
         self.driver.reset()
         self.steps, self.ret = 0, 0.0
         self.episode += 1
-        if self.brain.viewer: self.brain.viewer.note(f"DriveEnv episode {self.episode}")
+        if self.brain.viewer: self.brain.viewer.note(f"{self.brain.viewer.label}: episode {self.episode}")
         return self._obs(), dict(distance=0.0, t_ms=0.0)
 
     def step(self, action):
