@@ -43,10 +43,44 @@
     <section>
       <div class="sec-head"><h2>Drive</h2></div>
       <div class="seg mode-seg" id="mode-seg" role="group" aria-label="Drive mode">
-        <button data-mode="dance" class="on">Dance (sound)</button>
-        <button data-mode="brain">Brain (connectome)</button>
+        <button data-mode="dance" class="on">Dance</button>
+        <button data-mode="brain">Brain</button>
+        <button data-mode="keys">Keyboard</button>
+        <button data-mode="board">Switches</button>
       </div>
       <p class="note" id="mode-note">Choreography locked to the sound: no neurons are simulated.</p>
+    </section>
+
+    <section id="keys-sec" hidden>
+      <div class="sec-head"><h2>Keyboard</h2><span class="hint" id="keys-state">arrow keys or WASD</span></div>
+      <div class="keypad" id="keypad">
+        <span></span><kbd class="key" data-k="up">↑</kbd><span></span>
+        <kbd class="key" data-k="left">←</kbd><kbd class="key" data-k="down">↓</kbd><kbd class="key" data-k="right">→</kbd>
+        <kbd class="key space" data-k="jump">Space</kbd>
+      </div>
+      <dl class="keymap" id="keymap"></dl>
+      <label class="check"><input type="checkbox" id="chase" checked> Chase camera: stays behind the fly</label>
+      <p class="note">Each held key drives the fly's own command descending neurons with spikes, the way
+        experimenters activate them with light in real flies. The body reads the same neurons back from the
+        simulation, plus the nerve cord motor neurons they recruit; a key lights up with the firing of its
+        neurons, not with the key press. Rates stay below the level where the network runs away, and the
+        network is reset if it runs away anyway. Space shows a looming threat to both eyes: the escape
+        pathway fires the jump motor neuron TTMn.</p>
+    </section>
+
+    <section id="board-sec" hidden>
+      <div class="sec-head"><h2>Switchboard</h2><span class="hint" id="board-state">keys 1–8</span></div>
+      <div class="sw-row" id="sw-row"></div>
+      <label class="field">Switches
+        <select id="sw-count">
+          <option>4</option><option>5</option><option>6</option><option>7</option>
+          <option selected>8</option><option>9</option><option>10</option>
+        </select></label>
+      <dl class="keymap" id="reachmap"></dl>
+      <p class="note">A number key sends a command to the fly's brain: a descending neuron that drives the
+        front leg on that side through its own nerve cord circuit. The leg reaches toward the switch as far
+        as its motor neurons fire in the simulation, and the switch flips only if they fire enough. The fly is
+        tethered in front of the console, as in a lab setup.</p>
     </section>
 
     <section id="brain-sec" hidden>

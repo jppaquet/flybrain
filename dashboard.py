@@ -239,6 +239,8 @@ class Handler(BaseHTTPRequestHandler):
                     if act == "start": return self.send(200, self.live.start(body.get("params", {})))
                     if act == "event": self.live.event(body["id"], body["key"])
                     elif act == "audio": self.live.audio(body["id"], body.get("level", 0), bool(body.get("hit")))
+                    elif act == "drive": self.live.drive(body["id"], set(body.get("keys", [])))
+                    elif act == "reach": self.live.reach(body["id"], body["side"])
                     elif act == "stop": self.live.get(body["id"]).stop()
                     else: return self.send(404, {"error": "not found"})
                 except (KeyError, StopIteration) as e:

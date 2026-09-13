@@ -7,6 +7,7 @@ import { AudioEngine } from "./audio.js";
 import { Dancer } from "./dance.js";
 import { BrainLink, BodyController } from "./neural.js";
 import { Brain3D } from "./brain3d.js";
+import { Switchboard } from "./switchboard.js";
 
 const $ = s => document.querySelector(s);
 const stage = $("#stage"), canvas = $("#gl");
@@ -88,9 +89,11 @@ scene.add(fly.root);
 const grid = new THREE.GridHelper(80, 160, 0x2c2c31, 0x1d1d21);   // ground reference to see the walking
 grid.position.y = 0.001; scene.add(grid);
 
-const brain = new BrainLink(), body = new BodyController(fly), brain3d = new Brain3D(scene);
+const brain = new BrainLink(), body = new BodyController(fly), brain3d = new Brain3D(scene), board = new Switchboard(scene);
 brain.onNote = txt => body.note(txt);
-let mode = "dance", lastAudio = 0, lastKick = -10, stimNames = "", liftLeft = 0;
+let mode = "dance", lastAudio = 0, lastKick = -10, stimNames = "", liftLeft = 0, liftApplied = 0;
+let keysHeld = new Set(), lastDrive = 0, dragging = false;
+let presses = { L: null, R: null }, reachInfo = {}, queue = [];   // switchboard: press in progress per front leg, keys waiting
 const lastRoot = new THREE.Vector3();
 function followCamera() {
   const p = fly.root.position, d = p.clone().sub(lastRoot);
@@ -105,7 +108,17 @@ function setCam(name) {
   const o = new THREE.Vector3(controls.target.x, 0, controls.target.z + 0.1);   // relative to the fly
   camTween = { from: camera.position.clone(), to: new THREE.Vector3(...CAMS[name]).add(o), t: 0 };
   for (const b of $("#cams").querySelectorAll("[data-cam]")) b.classList.toggle("on", b.dataset.cam === name);
+  $("#chase").checked = false;                                 // a chosen view replaces the chase camera
 }
+/* Keyboard mode: the camera stays behind the fly (paused while the user drags the view). */
+const _want = new THREE.Vector3();
+function chaseCamera(dt) {
+  const t = controls.target, yaw = fly.root.rotation.y;
+  _want.set(t.x - Math.sin(yaw) * 5.4, t.y + 1.9, t.z - Math.cos(yaw) * 5.4);
+  camera.position.lerp(_want, 1 - Math.exp(-dt * 2.5));
+}
+controls.addEventListener("start", () => { dragging = true; });
+controls.addEventListener("end", () => { dragging = false; });
 camera.position.set(...CAMS.rear);
 $("#cams").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
@@ -231,11 +244,12 @@ function frame(ts) {
   last = now;
   const f = audio.update();
   let energy = 0;
-  if (mode === "brain") {
+  if (mode !== "dance") {
     brain.consume(dt);
-    const out = body.update(dt, brain.S, brain.raw, base);
+    const out = body.update(dt, brain.S, brain.raw, base, mode === "board" ? { tethered: true, reach: reachOpt() } : undefined);
     fly.apply(out.pose, out.feet);
     followCamera();
+    if (mode === "board") { checkPresses(now, out.reach); board.update(dt); }
     if (brain3d.group.visible) {
       for (const s of brain.spikes) brain3d.spike(s);
       const names = brain.cur ? brain.cur[4] : [], k = names.join(",");
@@ -249,6 +263,10 @@ function frame(ts) {
       if (f.kick) lastKick = now;
       if (now - lastAudio > 0.1) { lastAudio = now; brain.audio(f.active ? f.level : 0); }
     }
+    if (mode === "keys") {
+      if (keysHeld.size && now - lastDrive > 0.1) sendDrive();   // keep-alive: inputs expire after 300 ms
+      if ($("#chase").checked && !dragging && !camTween) chaseCamera(dt);
+    }
   } else {
     const d = dancer.update(dt, f, opts, base);
     energy = d.energy;
@@ -257,7 +275,7 @@ function frame(ts) {
   }
   if (Math.abs(liftLeft) > 1e-4) {                             // camera rises to frame the 3D brain
     const d = liftLeft * (1 - Math.exp(-dt * 5));
-    controls.target.y += d; camera.position.y += d; liftLeft -= d;
+    controls.target.y += d; camera.position.y += d; liftLeft -= d; liftApplied += d;
   }
   updateTiles(dt);
   spotPulse *= Math.exp(-dt * 6);
@@ -266,6 +284,7 @@ function frame(ts) {
     camTween.t = Math.min(1, camTween.t + dt / 0.7);
     const e = 1 - Math.pow(1 - camTween.t, 3);
     camera.position.lerpVectors(camTween.from, camTween.to, e);
+    if (camTween.tt) controls.target.lerpVectors(camTween.tf, camTween.tt, e);   // also move the point looked at
     if (camTween.t >= 1) camTween = null;
   }
   controls.update(dt);
@@ -280,8 +299,8 @@ function frame(ts) {
     lastText = now;
     $("#db-val").textContent = f.db > -99 ? `${Math.round(f.db)} dB` : "–";
     $("#bpm").textContent = f.bpm ? `${Math.round(f.bpm)} BPM` : "– BPM";
-    if (mode === "brain") updateBrainUI();
-    const state = mode === "brain" ? brainChip()
+    if (mode !== "dance") updateBrainUI();
+    const state = mode !== "dance" ? brainChip()
       : f.mode === "none" ? ["", "No audio source"]
       : !f.active ? ["listening", "Stopped · silence"]
       : !opts.enabled ? ["listening", "Sound detected · dancing off"]
@@ -295,13 +314,13 @@ function frame(ts) {
 
 /* ------------------------------------------------------------- 3D brain */
 async function showBrain(on) {
-  on = on && mode === "brain";
+  on = on && mode !== "dance";
   if (on === brain3d.group.visible) return;
   if (on) {
     try {
       if (!brain3d.N) status("Loading the neuron positions…");
       await brain3d.load();
-      if (!$("#live-brain").checked || mode !== "brain") return;
+      if (!$("#live-brain").checked || mode === "dance") return;
       status(`3D brain: ${brain3d.N.toLocaleString("en-US")} neurons at their soma position`);
     } catch (e) { return status(`3D brain unavailable: ${e.message}`, true); }
   } else brain3d.clear();
@@ -320,21 +339,166 @@ const FUNCS = [["pro", "pro"], ["rem", "rem"], ["trx", "tr ext"], ["trf", "tr fl
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 let chanRows = {}, legCells = {}, chanInfo = {};
 
+const MODE_NOTE = {
+  dance: "Choreography locked to the sound: no neurons are simulated.",
+  brain: "The body follows the descending and motor neurons of the connectome simulation.",
+  keys: "The arrow keys drive the fly's command descending neurons; the body follows the connectome simulation.",
+  board: "The number keys make the tethered fly press switches with its front legs, moved by its own nerve cord.",
+};
 function setMode(m) {
+  const prev = mode;
   mode = m;
+  if (prev === "board" && m !== "board") {                     // leave the console view: back to the fly
+    controls.target.set(fly.root.position.x, 0.42 + liftApplied, fly.root.position.z - 0.1);
+    if (m !== "keys") setCam("rear");
+  }
   for (const b of $("#mode-seg").children) b.classList.toggle("on", b.dataset.mode === m);
-  $("#brain-sec").hidden = m !== "brain"; $("#dance-sec").hidden = m === "brain"; $("#evlog").hidden = m !== "brain";
-  $("#mode-note").textContent = m === "brain"
-    ? "The body follows the descending and motor neurons of the connectome simulation."
-    : "Choreography locked to the sound: no neurons are simulated.";
+  $("#brain-sec").hidden = m === "dance"; $("#keys-sec").hidden = m !== "keys"; $("#board-sec").hidden = m !== "board";
+  $("#dance-sec").hidden = m !== "dance"; $("#evlog").hidden = m === "dance";
+  $("#mode-note").textContent = MODE_NOTE[m];
+  board.group.visible = m === "board";
+  if (m !== "keys") releaseKeys();
+  if (m !== "board") { presses = { L: null, R: null }; queue = []; }
   if (m === "dance") { brain.stop(); $("#live-start").textContent = "Start simulation"; body.reset(); fly.root.position.set(0, 0, 0); followCamera(); }
+  if (m === "board") { body.reset(); fly.root.position.set(0, 0, 0); followCamera(); boardView(); }
+  if (m === "keys" || m === "board") {
+    document.activeElement?.blur();                            // Space must not click the focused button
+    if (brain.id == null) startLive();
+  }
   showBrain($("#live-brain").checked);
   lastChip = "";
 }
 $("#mode-seg").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setMode(b.dataset.mode); });
 
+/* ------------------------------------------------------------- keyboard */
+const KEYMAP = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+                 KeyW: "up", KeyS: "down", KeyA: "left", KeyD: "right" };
+const KEY_CHAN = { up: "fwd", down: "back", left: "turnL", right: "turnR", jump: "ttmn" };
+const typing = e => /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) && !["checkbox", "button"].includes(e.target.type);
+function sendDrive() {
+  lastDrive = performance.now() / 1000;
+  const both = keysHeld.has("up") && keysHeld.has("down");     // opposite commands cancel out
+  brain.drive([...keysHeld].filter(k => !(both && (k === "up" || k === "down"))));
+}
+function setKey(k, on) {
+  if (on === keysHeld.has(k)) return;
+  if (on) keysHeld.add(k); else keysHeld.delete(k);
+  $(`#keypad [data-k="${k}"]`).classList.toggle("on", on);
+  sendDrive();
+}
+function releaseKeys() { for (const k of [...keysHeld]) setKey(k, false); }
+function jump() {
+  if (brain.id == null) return;
+  brain.event("loom"); body.note("Space: looming on both eyes");
+}
+addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey || typing(e)) return;
+  if (mode === "board" && /^(Digit|Numpad)\d$/.test(e.code)) {
+    e.preventDefault();
+    const d = +e.code.slice(-1);
+    if (!e.repeat) press(d === 0 ? 9 : d - 1);
+    return;
+  }
+  if (mode !== "keys") return;
+  if (e.code === "Space") {
+    e.preventDefault(); $('#keypad [data-k="jump"]').classList.add("on");
+    if (!e.repeat) jump();
+    return;
+  }
+  const k = KEYMAP[e.code];
+  if (k) { e.preventDefault(); setKey(k, true); }
+});
+addEventListener("keyup", e => {
+  if (e.code === "Space") { $('#keypad [data-k="jump"]').classList.remove("on"); if (mode === "keys") e.preventDefault(); }
+  const k = KEYMAP[e.code];
+  if (k) setKey(k, false);
+});
+addEventListener("blur", releaseKeys);
+document.addEventListener("visibilitychange", () => { if (document.hidden) releaseKeys(); });
+
+/* ----------------------------------------------------------- switchboard */
+/* Three-quarter front view: the console in the foreground, the fly reaching toward us,
+   the 3D brain above it in the background. */
+function boardView() {
+  camTween = { from: camera.position.clone(), to: new THREE.Vector3(1.2, 1.95, 4.6),
+               tf: controls.target.clone(), tt: new THREE.Vector3(0, 0.55, 1.0), t: 0 };
+  for (const b of $("#cams").querySelectorAll("[data-cam]")) b.classList.remove("on");
+}
+/* Number key i: the descending neuron of that side's front leg gets a burst; the leg then
+   reaches as far as its motor neurons fire (BodyController), and checkPresses flips the
+   switch when the tarsus gets there. */
+function press(i) {
+  if (i >= board.n) return;
+  if (brain.id == null || !reachInfo.L) return body.note("Start the simulation first");
+  if (queue.length < 4) queue.push(i);
+  startNext(); renderSwitchRow();
+}
+/* One leg at a time: driving both DNg12_e together tips the network into its runaway state. */
+function startNext() {
+  if (presses.L || presses.R || !queue.length) return;
+  const i = queue.shift(), s = board.side(i);
+  presses[s] = { i, t0: performance.now() / 1000, peak: 0, hit: 0, done: false };
+  brain.takePeak(reachInfo[s].read);                           // forget activity from before the key
+  brain.reach(s);
+  body.note(`Key ${board.label(i)} → ${reachInfo[s].label}`);
+}
+const _knob = { L: new THREE.Vector3(), R: new THREE.Vector3() };
+function reachOpt() {
+  const o = {};
+  for (const s of ["L", "R"]) {
+    const p = presses[s], R = reachInfo[s];
+    if (R) o[s] = { target: p && !p.done ? board.pos(p.i, _knob[s]) : null, read: R.read, ref: R.ref };
+  }
+  return o;
+}
+function checkPresses(now, reach) {
+  for (const s of ["L", "R"]) {
+    const p = presses[s], R = reachInfo[s];
+    if (!p || !R) continue;
+    const leg = s === "L" ? "left" : "right";
+    p.peak = Math.max(p.peak, brain.takePeak(R.read));
+    // the motor neurons decide (peak over every simulated frame); the flip waits for the leg to arrive
+    if (!p.hit && p.peak >= R.press) p.hit = now;
+    if (p.hit && !p.done && (reach[s] > 0.75 || now - p.hit > 0.25)) {
+      p.done = true;
+      const on = board.toggle(p.i);
+      body.note(`Switch ${board.label(p.i)} ${on ? "on" : "off"} · ${leg} front leg motor neurons at ${Math.round(p.peak)} Hz`);
+    } else if (!p.hit && !p.done && now - p.t0 > R.ms / 1000 + 0.8) {
+      p.done = true;
+      body.note(`Switch ${board.label(p.i)}: no press, the ${leg} front leg motor neurons only reached ${Math.round(p.peak)} Hz (needs ${R.press})`);
+    }
+    if (p.done && reach[s] < 0.15 && now - p.t0 > 0.3) presses[s] = null;
+  }
+  startNext(); renderSwitchRow();
+}
+function renderSwitchRow() {
+  const row = $("#sw-row");
+  if (row.children.length !== board.n) row.replaceChildren(...[...Array(board.n).keys()].map(i => el("span", null, board.label(i))));
+  [...row.children].forEach((c, i) => {
+    c.classList.toggle("on", board.isOn(i));
+    c.classList.toggle("busy", presses.L?.i === i || presses.R?.i === i || queue.includes(i));
+  });
+}
+function renderReachMap() {
+  if (!reachInfo.L) return;
+  const range = s => { const k = [...Array(board.n).keys()].filter(i => board.side(i) === s).map(i => board.label(i));
+                       return k.length > 1 ? `${k[0]}–${k[k.length - 1]}` : k[0] || "–"; };
+  $("#reachmap").replaceChildren(...["R", "L"].flatMap(s => [el("dt", null, `Keys ${range(s)}`),   // switch 1 is on the right
+    el("dd", null, `${reachInfo[s].label} · ${reachInfo[s].hz} Hz × ${reachInfo[s].ms} ms · flips when the ${reachInfo[s].read_label} reach ${reachInfo[s].press} Hz`)]));
+}
+$("#sw-count").addEventListener("change", e => {
+  board.setCount(+e.target.value); presses = { L: null, R: null }; queue = [];
+  $("#board-state").textContent = `keys 1–${board.label(board.n - 1)}`;
+  renderSwitchRow(); renderReachMap(); e.target.blur();      // digits must reach the page, not the select
+});
+renderSwitchRow();
 function buildBrainUI(info) {
   chanInfo = Object.fromEntries(info.channels.map(c => [c.key, c]));
+  reachInfo = Object.fromEntries(info.reach.map(r => [r.side, r])); renderReachMap();
+  const ARROW = { up: "↑ W", down: "↓ S", left: "← A", right: "→ D" }, loom = info.events.find(e => e.key === "loom");
+  $("#keymap").replaceChildren(...info.drive.flatMap(d => [el("dt", null, ARROW[d.key]),
+    el("dd", null, `${d.label} · ${d.hz} Hz · ${d.n} neurons`)]),
+    el("dt", null, "Space"), el("dd", null, `Jump: looming on both eyes (LC4, ${loom.n} neurons) → TTMn`));
   for (const kind of ["sens", "opto"]) {
     $(kind === "sens" ? "#ev-sens" : "#ev-opto").replaceChildren(...info.events.filter(e => e.kind === kind).map(e => {
       const b = el("button", "ghost", e.label);
@@ -375,21 +539,31 @@ function updateBrainUI() {
     c.style.background = `color-mix(in srgb, var(--accent) ${Math.round(a * 100)}%, var(--surface-2))`;
     c.title = `${chanInfo[k].label} · ${chanInfo[k].n} MN · ${Math.round(S[k] || 0)} Hz`;
   }
+  // each key lights up with the firing of the neurons it drives (fwd, back, turn, TTMn)
+  for (const [k, ch] of Object.entries(KEY_CHAN)) {
+    const a = 1 - Math.exp(-(S[ch] || 0) / (k === "jump" ? 5 : 20));
+    $(`#keypad [data-k="${k}"]`).style.background = `color-mix(in srgb, var(--accent) ${Math.round(a * 70)}%, var(--surface-2))`;
+  }
+  if (mode === "keys") $("#keys-state").textContent = brain.id == null ? "start the simulation"
+    : keysHeld.size ? [...keysHeld].map(k => ({ up: "↑", down: "↓", left: "←", right: "→" })[k]).join(" ") : "arrow keys or WASD";
   const st = brain.status;
   $("#live-state").textContent = brain.id == null ? "stopped" : st ? `t ${(st.t_ms / 1000).toFixed(1)} s` : "starting…";
   if (brain.error) status(`Simulation: ${brain.error}`, true);
   const log = body.events.slice(-4);
-  $("#evlog").replaceChildren(...(log.length ? log : [[body.t, "Start the simulation, then send a stimulus"]]).map(([t, txt]) => {
+  const hint = brain.id == null ? "Start the simulation" : mode === "keys" ? "Hold an arrow key to walk, Space to jump"
+    : mode === "board" ? `Press 1–${board.label(board.n - 1)} to flip a switch` : "Send a stimulus";
+  $("#evlog").replaceChildren(...(log.length ? log : [[body.t, hint]]).map(([t, txt]) => {
     const d = el("div"); d.append(el("b", null, `${t.toFixed(1)} s`), txt); return d;
   }));
 }
 
 function brainChip() {
-  if (brain.id == null) return ["", "Brain · simulation stopped"];
+  const who = mode === "keys" ? "Keyboard" : mode === "board" ? "Switchboard" : "Brain";
+  if (brain.id == null) return ["", `${who} · simulation stopped`];
   const st = brain.status;
-  if (!st) return ["listening", "Brain · starting…"];
+  if (!st) return ["listening", `${who} · starting…`];
   const n = brain.cur ? brain.cur[3] : 0;
-  return [n > 0 ? "dancing" : "listening", `Brain · ${st.speed.toFixed(2)}× real time · ${n.toLocaleString("en-US")} active neurons`];
+  return [n > 0 ? "dancing" : "listening", `${who} · ${st.speed.toFixed(2)}× real time · ${n.toLocaleString("en-US")} active neurons`];
 }
 
 const liveParams = () => ({ model: "shiu", dt: +$("#live-dt").value, w_scale: +$("#live-w").value,
@@ -407,7 +581,7 @@ async function startLive(note) {
   } catch (e) { status(`Simulation failed: ${e.message}`, true); }
 }
 $("#live-start").addEventListener("click", () => {
-  if (brain.id != null) { brain.stop(); $("#live-start").textContent = "Start simulation"; return; }
+  if (brain.id != null) { releaseKeys(); brain.stop(); $("#live-start").textContent = "Start simulation"; return; }
   startLive();
 });
 $("#live-zero").addEventListener("click", () => startLive("Network reset to rest"));
@@ -419,5 +593,5 @@ status("Ready · pick a sound source: demo beat, file or microphone");
 window.fly = {
   get pose() { return { ...base }; },
   set(k, v) { if (k in base) { base[k] = +v; syncSliders(); } },
-  audio, dancer, model: fly, scene, camera, brain3d,
+  audio, dancer, model: fly, scene, camera, brain3d, board,
 };

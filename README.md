@@ -8,7 +8,7 @@ on your own machine, and watch it drive a 3D fly.
   class, body ID…), silence others, choose readouts, and run a spiking simulation.
   Results: activity map of every soma, raster, population rates per anatomical group,
   most active neurons and cell types, and a per-neuron inspector (inputs, outputs).
-- **3D fly** (`/fly`) — a procedural 3D male fly with inverse-kinematics legs, and two
+- **3D fly** (`/fly`) — a procedural 3D male fly with inverse-kinematics legs, and four
   ways to drive it:
   - *Dance*: twerks to music (demo beat, audio file or microphone) and stops on silence.
     Pure choreography, no neurons involved.
@@ -18,6 +18,12 @@ on your own machine, and watch it drive a 3D fly.
     DNp09 → walking; DNa02 → turning; music → auditory JO-B neurons → wing motor
     neurons → wing flicks on the beat… Above the fly, a 3D point cloud of all
     165,384 neurons lights up as they fire.
+  - *Keyboard*: steer the fly with the arrow keys (or WASD) through its own command
+    descending neurons — ↑ DNp09 (forward), ↓ MDN (backward), ← → DNa01/02 (turns) —
+    and make it jump with Space (looming on both eyes → giant fiber → TTMn).
+  - *Switches*: the fly stands tethered in front of a console of 4–10 toggle switches;
+    the number keys make it reach out with a front leg and flip them, through DNg12_e
+    and the front-leg motor neurons it recruits.
 
 ## Requirements
 
@@ -68,7 +74,7 @@ ORN DA1, Johnston's organ…), set a Poisson rate and a time window, add readout
 *Simulate* (⌘/Ctrl+Enter). Click any neuron (map, raster, tables) to inspect its
 connections and to stimulate, read out or silence it.
 
-**3D fly — brain mode.** Choose *Brain (connectome)*, *Start simulation*, then
+**3D fly — brain mode.** Choose *Brain*, *Start simulation*, then
 send stimuli: sensory (looming left/right, taste, sound, wind, cVA odour) or direct
 “optogenetic” activation of a descending neuron (giant fiber, DNp09, MDN, DNa02, pIP10,
 MN9). The panel shows the live rates of the motor channels, including a legs × muscles
@@ -80,6 +86,27 @@ The brain floating above the fly shows every neuron at its soma position, in the
 own orientation (brain over the head, ventral nerve cord over the thorax), coloured by
 anatomical group. A neuron flashes white when it fires, and the neurons driven by a
 stimulus glow amber. Untick *Show the brain in 3D above the fly* to hide it.
+
+**3D fly — keyboard mode.** Choose *Keyboard*: the simulation starts, and each held key
+drives the fly's command descending neurons with Poisson spikes, the way experimenters
+activate them with light in real flies (DNp09 at 25 Hz, MDN at 55 Hz, DNa01/02 at 150 Hz).
+The body reads those neurons back from the simulation, with the nerve cord motor neurons
+they recruit, so the network's side effects show: DNp09 also drives the left DNa02 a
+little, and the fly tends to drift left. Each key lights up with the firing of its
+neurons. Space shows a looming threat to both eyes, which fires the jump motor neuron
+TTMn within ~15 ms. The chase camera stays behind the fly; pick a view to leave it.
+
+**3D fly — switchboard mode.** Choose *Switches*: the fly is tethered in front of a console
+(4 to 10 switches, seen from the front), and keys 1–9, 0 flip the switches. The switches
+on the fly's right are pressed by its right front leg, those on its left by its left one.
+A key sends a 400 ms burst to DNg12_e on that
+side — in a screen of all 472 descending neuron types, the one that moves a front leg most
+specifically: alone it recruits about 20 neurons, mostly that leg's coxa promotors. The
+leg reaches toward the switch as far as those motor neurons fire in the simulation, and
+the switch flips only if they reach 16 Hz (they peak at 30–60 Hz); the log gives their peak
+rate. Keys pressed
+during a reach wait their turn: one leg at a time, because driving both DNg12_e together
+tips the network into its self-sustained state.
 
 **Command line.** `flysim.py` runs the same model without the browser:
 
@@ -107,6 +134,11 @@ stimulus glow amber. Untick *Show the brain in 3D above the fly* to hide it.
   stimulus if activity persists, and logs it. Short-term synaptic depression is
   available as an option: it prevents that state but also silences the pathways that
   need fast firing (TTMn, MN9).
+- Keyboard mode: the keys drive the same descending neurons the body reads for walking,
+  so walking itself is guaranteed; what the connectome adds is how those neurons
+  interact and which motor neurons they recruit. DNp09 tips the network into the
+  self-sustained state from ~30 Hz and MDN from ~100 Hz, hence the drive rates; if it
+  happens anyway while you drive, the network is reset and the event is logged.
 - In brain mode, the rates come from the connectome; turning them into joint angles,
   the tripod walking gait and the jump trajectory are hand-written (the network has no
   rhythm generator). The dance mode uses no neurons at all.

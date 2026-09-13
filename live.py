@@ -11,13 +11,15 @@ such as sound -> Johnston's organ). For each slice we compute the firing rate of
     translated directly into posture.
 Every BRAIN_EVERY slices, the frame also lists the neurons that fired (for the 3D brain).
 """
-import base64, re, threading, time
+import base64, collections, re, threading, time
 import numpy as np
 import engine
 
 FRAME_MS = 10.0
 BRAIN_EVERY = 4        # one brain frame every 40 ms of simulated time
 BRAIN_CAP = 4000       # neurons sent per brain frame (random sample beyond that)
+RUNAWAY_N = 150        # while only keys drive the network: reset if more neurons than this fire
+RUNAWAY_FRAMES = 30    # per 10 ms on average over 30 frames (key driving: < 60; runaway: 230 to 1,700)
 
 LEGS = [("fl", "T1"), ("ml", "T2"), ("hl", "T3")]
 LEG_FUNCS = [  # (key, label, pattern on the motor neuron type)
@@ -35,6 +37,8 @@ LEG_FUNCS = [  # (key, label, pattern on the motor neuron type)
 EVENTS = [
     dict(key="loomL", label="Looming, left", kind="sens", query=r"^LC4$", field="type", side="L", hz=150, ms=300),
     dict(key="loomR", label="Looming, right", kind="sens", query=r"^LC4$", field="type", side="R", hz=150, ms=300),
+    # both eyes: TTMn fires within ~15 ms, the reliable way to make the fly jump
+    dict(key="loom", label="Looming, both eyes", kind="sens", query=r"^LC4$", field="type", hz=150, ms=300),
     # GRNs that recruit MN9 in this connectome at w_scale 0.5 (screened over the 60 gustatory types)
     dict(key="sugar", label="Taste (LB3c + taste pegs)", kind="sens", query=r"^(LB3c|claw_tpGRN)$", field="type", hz=150, ms=800),
     # Johnston's organ: JO-A/B pick up sound (vibrations), JO-C/E wind and gravity
@@ -54,6 +58,27 @@ EVENTS = [
 # push the network into the self-sustained state. A background drive that follows the
 # volume, and a short burst on every onset (kick drum): the motor output then follows the beat.
 AUDIO_INPUT = dict(query=r"^JO-B", field="type", hz=30.0, hit_hz=300.0, hit_ms=80.0)
+# Arrow keys -> the fly's own command descending neurons, driven while the key is held
+# ("virtual optogenetics", as with CsChrimson in real flies). Rates stay below the level
+# where the network tips into its self-sustained state (at w_scale 0.5: DNp09 runs away
+# from ~30 Hz, MDN from ~100 Hz; DNa01/02 never do).
+DRIVE = [
+    dict(key="up", label="DNp09: walk forward", query=r"^DNp09$", field="type", hz=25),
+    dict(key="down", label="MDN: walk backward", query=r"^MDN$", field="type", hz=55),
+    dict(key="left", label="DNa01/02 left: turn left", query=r"^DNa0[12]$", field="type", side="L", hz=150),
+    dict(key="right", label="DNa01/02 right: turn right", query=r"^DNa0[12]$", field="type", side="R", hz=150),
+]
+# Switchboard: a number key makes the fly press a switch with a front leg. The key drives
+# DNg12_e on that side: in a screen of all 472 left DN types, the most specific front-leg
+# descending neuron (alone it recruits ~20-30 neurons, mostly the coxa promotors, which
+# swing the leg forward, 30-60 Hz within 50 ms at 250 Hz, and on the left the tibia
+# extensors). The page reads the promotors back to move the leg, and the switch flips only
+# if they fire enough. One leg at a time: both DNg12_e together tip the network into its
+# self-sustained state (~3,500 neurons).
+REACH = [dict(side=s, label=f"DNg12_e {'left' if s == 'L' else 'right'}: reach with the front leg",
+              query=r"^DNg12_e$", field="type", hz=250, ms=400, ref=12, press=16,   # flips at 16 Hz (peaks: 30-60)
+              read=[f"T1{s}_pro"], read_label=f"T1{s} coxa promotors")
+         for s in "LR"]
 
 
 def select(C, query, field="type", side=None):
@@ -118,7 +143,7 @@ class Session:
         n = max(1, int(round(FRAME_MS / self.q["dt"])))
         w0, s0 = time.time(), self.sim.t_ms
         quench_ms, last_input = self.q.get("quench_ms", 0.0), 0.0
-        acc, rng = [], np.random.default_rng(0)
+        acc, rng, recent = [], np.random.default_rng(0), collections.deque(maxlen=RUNAWAY_FRAMES)
         try:
             while not self.stop_ev.is_set():
                 if time.time() - self.last_poll > 20: break        # nobody is watching any more
@@ -141,6 +166,13 @@ class Session:
                     self.sim.quench(); last_input = self.sim.t_ms
                     note = (f"Safeguard: self-sustained activity switched off ({nact} neurons still active "
                             f"{quench_ms / 1000:.1f} s after the last stimulus)")
+                # while driving with the keys, the same state can start under the drive itself
+                # (other inputs, e.g. the looming jump, legitimately recruit more: not counted)
+                if names and all(k.startswith("key:") for k in names): recent.append(nact)
+                else: recent.clear()
+                if len(recent) == RUNAWAY_FRAMES and sum(recent) / RUNAWAY_FRAMES > RUNAWAY_N:
+                    self.sim.quench(); recent.clear()
+                    note = f"Safeguard: runaway while driving switched off ({nact:,} neurons firing per 10 ms)"
                 # neurons that fired over the last BRAIN_EVERY slices, as base64 int32
                 acc.append(fired); brain = None
                 if len(acc) >= BRAIN_EVERY:
@@ -178,13 +210,23 @@ class Live:
     """One session at a time (local server, single user)."""
     def __init__(self, C):
         self.C, self.session, self.sid = C, None, 0
-        self._ev, self._jo = None, None
+        self._ev, self._jo, self._drive, self._reach = None, None, None, None
 
     def event_idx(self):
         """Neurons driven by each event (regex over 165k neurons: computed once)."""
         if self._ev is None:
             self._ev = {e["key"]: select(self.C, e["query"], e["field"], e.get("side")) for e in EVENTS}
         return self._ev
+
+    def drive_idx(self):
+        if self._drive is None:
+            self._drive = {d["key"]: select(self.C, d["query"], d["field"], d.get("side")) for d in DRIVE}
+        return self._drive
+
+    def reach_idx(self):
+        if self._reach is None:
+            self._reach = {r["side"]: select(self.C, r["query"], r["field"], r["side"]) for r in REACH}
+        return self._reach
 
     def audio_idx(self):
         if self._jo is None: self._jo = select(self.C, AUDIO_INPUT["query"], AUDIO_INPUT["field"])
@@ -194,11 +236,13 @@ class Live:
         if self.session: self.session.stop()
         self.sid += 1
         self.session = Session(self.C, params)
-        ev = self.event_idx()
+        ev, dr, rc = self.event_idx(), self.drive_idx(), self.reach_idx()
         return dict(id=self.sid, frame_ms=FRAME_MS, brain_ms=FRAME_MS * BRAIN_EVERY, params=self.session.q,
                     channels=[dict(key=c["key"], label=c["label"], group=c["group"], n=int(len(c["idx"])))
                               for c in self.session.chans],
                     events=[dict(e, n=int(len(ev[e["key"]])), idx=ev[e["key"]].tolist()) for e in EVENTS],
+                    drive=[dict(d, n=int(len(dr[d["key"]])), idx=dr[d["key"]].tolist()) for d in DRIVE],
+                    reach=[dict(r, n=int(len(rc[r["side"]])), idx=rc[r["side"]].tolist()) for r in REACH],
                     audio_idx=self.audio_idx().tolist())
 
     def get(self, sid):
@@ -215,3 +259,16 @@ class Live:
         level = min(max(float(level), 0.0), 1.0)
         if hit: s.stimulate("audio:hit", idx, A["hit_hz"], A["hit_ms"])
         else: s.stimulate("audio", idx, A["hz"] * level, 400)
+
+    def drive(self, sid, keys):
+        """Arrow keys held on the page -> command descending neurons. The page resends the
+        held keys every ~100 ms; each input expires after 300 ms, so a page that goes away
+        releases its keys by itself."""
+        s, idx = self.get(sid), self.drive_idx()
+        for d in DRIVE:
+            s.stimulate(f"key:{d['key']}", idx[d["key"]], d["hz"] if d["key"] in keys else 0, 300)
+
+    def reach(self, sid, side):
+        """Number key on the switchboard -> a burst to the front-leg descending neuron of that side."""
+        r = next(r for r in REACH if r["side"] == side)
+        self.get(sid).stimulate(f"reach:{side}", self.reach_idx()[side], r["hz"], r["ms"])

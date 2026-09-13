@@ -17,6 +17,7 @@ export class BrainLink {
   reset() {
     this.id = null; this.info = null; this.frames = []; this.next = 0; this.tPlay = null;
     this.S = {}; this.raw = {}; this.cur = null; this.status = null; this.error = null; this.spikes = [];
+    this.peak = {};
   }
   async start(params) {
     this.stop();
@@ -47,10 +48,14 @@ export class BrainLink {
   }
   event(key) { if (this.id != null) fetch("/api/live/event", { method: "POST", body: JSON.stringify({ id: this.id, key }) }); }
   audio(level, hit = false) { if (this.id != null) fetch("/api/live/audio", { method: "POST", body: JSON.stringify({ id: this.id, level, hit }) }); }
+  drive(keys) { if (this.id != null) fetch("/api/live/drive", { method: "POST", body: JSON.stringify({ id: this.id, keys }) }); }
+  reach(side) { if (this.id != null) fetch("/api/live/reach", { method: "POST", body: JSON.stringify({ id: this.id, side }) }); }
 
   /* Neurons driven by the current inputs (frame names -> indices from the start info). */
   inputIdx(names) {
     return names.map(n => n.startsWith("ev:") ? this.info.events.find(e => e.key === n.slice(3))?.idx
+                         : n.startsWith("key:") ? this.info.drive.find(d => d.key === n.slice(4))?.idx
+                         : n.startsWith("reach:") ? this.info.reach.find(r => r.side === n.slice(6))?.idx
                          : n.startsWith("audio") ? this.info.audio_idx : null).filter(Boolean);
   }
 
@@ -74,9 +79,18 @@ export class BrainLink {
         const key = this.keys[i];
         this.S[key] = (this.S[key] || 0) + (r - (this.S[key] || 0)) * k;
         this.raw[key] = Math.max(r, n > 1 ? this.raw[key] || 0 : 0);
+        if (this.S[key] > (this.peak[key] || 0)) this.peak[key] = this.S[key];
       });
     }
     return n > 0;
+  }
+
+  /* Highest smoothed rate of these channels since the last call, over every simulated frame
+     (a slow display may render only some of them), averaged over the channels. */
+  takePeak(keys) {
+    let m = 0;
+    for (const k of keys) { m += this.peak[k] || 0; this.peak[k] = 0; }
+    return keys.length ? m / keys.length : 0;
   }
 }
 
@@ -92,6 +106,7 @@ export class BodyController {
     this.feet = this.fly.legs.map((_, k) => this.nominal(k, this.pos, this.yaw));
     this.swing = this.fly.legs.map(() => null);
     this.jump = null; this.lastJump = -10; this.t = 0; this.events = [];
+    this.rs = { L: 0, R: 0 }; this.rt = { L: null, R: null };      // reach level and last target per front leg
   }
 
   nominal(k, pos, yaw, stance = 1, out = new THREE.Vector3()) {
@@ -102,26 +117,29 @@ export class BodyController {
 
   note(text) { this.events.push([this.t, text]); if (this.events.length > 6) this.events.shift(); }
 
-  update(dt, S, raw, base) {
+  /* opt.tethered: the fly stays in place (switchboard); opt.reach: {L, R} -> {target,
+     read, ref} front leg reaching toward target, as far as the `read` motor channels fire. */
+  update(dt, S, raw, base, opt = {}) {
     this.t += dt;
     const g = k => S[k] || 0, a = (k, ref = 30) => act(g(k), ref);
     const p = { ...base };
-    const root = this.fly.root;
+    const root = this.fly.root, tethered = !!opt.tethered;
 
     // --- jump: one spike of TTMn (motor neuron of the jump muscle, downstream of the
     //     giant fiber) is enough, as in the real fly
-    if (!this.jump && this.t - this.lastJump > 1.2 && (raw.ttmn || 0) > 0) {
+    if (!tethered && !this.jump && this.t - this.lastJump > 1.2 && (raw.ttmn || 0) > 0) {
       this.jump = { t: 0, vx: Math.sin(this.yaw), vz: Math.cos(this.yaw) };
       this.lastJump = this.t;
       this.note(`Jump: TTMn fired (giant fiber at ${Math.round(S.gf || 0)} Hz)`);
     }
 
-    // --- locomotion: DNp09 (forward), MDN (backward), DNa01/02 (ipsilateral turn)
-    const vT = VMAX * a("fwd", 40) - 0.6 * VMAX * a("back", 40);
+    // --- locomotion: DNp09 (forward), MDN (backward), DNa01/02 (ipsilateral turn);
+    //     DNp09 ~25 Hz already gives a brisk walk (above ~30 Hz the network runs away)
+    const vT = VMAX * a("fwd", 20) - 0.6 * VMAX * a("back", 30);
     const wT = WMAX * (a("turnL", 40) - a("turnR", 40));
     const kk = 1 - Math.exp(-dt / 0.15);
     this.v += (vT - this.v) * kk; this.w += (wT - this.w) * kk;
-    if (!this.jump) {
+    if (!this.jump && !tethered) {
       this.yaw += this.w * dt;
       this.pos.x += Math.sin(this.yaw) * this.v * dt; this.pos.z += Math.cos(this.yaw) * this.v * dt;
     }
@@ -144,6 +162,11 @@ export class BodyController {
         this.feet = this.fly.legs.map((_, k) => this.nominal(k, this.pos, this.yaw));
         this.swing = this.swing.map(() => null);
       }
+    } else if (tethered) {
+      root.position.set(this.pos.x, 0, this.pos.z);
+      this.feet = this.fly.legs.map((_, k) => this.nominal(k, this.pos, this.yaw, base.stance));
+      this.swing = this.swing.map(() => null);
+      feet = this.feet.map(f => f.clone());
     } else {
       root.position.set(this.pos.x, 0, this.pos.z);
       feet = this.gait(dt, base.stance);
@@ -164,6 +187,24 @@ export class BodyController {
       p.height += 0.05 * push / feet.length;
     }
 
+    // --- reach (switchboard): the front leg's tarsus moves toward its target as far as the
+    //     leg's motor neurons fire in the simulation, then comes back when they stop
+    const reach = {};
+    for (const [side, k] of [["L", 1], ["R", 0]]) {
+      const R = opt.reach?.[side];
+      const hz = R?.read.length ? R.read.reduce((s, ch) => s + g(ch), 0) / R.read.length : 0;
+      const want = R?.target ? act(hz, R.ref) : 0;
+      if (R?.target) this.rt[side] = R.target;
+      this.rs[side] += (want - this.rs[side]) * (1 - Math.exp(-dt / 0.08));
+      const r = reach[side] = this.rs[side];
+      if (this.rt[side] && r > 0.005 && !this.jump) {
+        const f = new THREE.Vector3().lerpVectors(feet[k], this.rt[side], r);
+        f.y += 0.3 * 4 * r * (1 - r);                          // the foot arcs up, then down onto the knob
+        feet[k] = f;
+      }
+    }
+    p.pitch += 0.08 * Math.max(reach.L, reach.R);
+
     // --- other motor neurons
     p.proboscis = Math.max(p.proboscis, clamp01(act(g("mn9"), 50) + 0.3 * a("pm", 40)));
     // wing steering: 20-30 Hz on every hit of sound (JO-B -> DNp02/06 -> MN); spread + raise
@@ -178,7 +219,7 @@ export class BodyController {
     p.antenna += 0.35 * (a("antL", 12) + a("antR", 12)) / 2;
     p.abdPitch -= 0.35 * (a("abdL") + a("abdR")) / 2;
     p.abdYaw += 0.3 * (a("abdL") - a("abdR"));
-    return { pose: p, feet };
+    return { pose: p, feet, reach };
   }
 
   /* Tripod gait: feet fixed on the ground in stance, swing arc toward the anticipated

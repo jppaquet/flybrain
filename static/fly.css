@@ -73,6 +73,25 @@ code { font-size: 11.5px; background: var(--surface-2); padding: 0 4px; border-r
 .leg-grid .r { color: var(--ink-2); align-self: center; }
 .leg-grid .c { height: 16px; border-radius: 3px; background: var(--surface-2); }
 .leg-grid .c.na { background: transparent; border: 1px dashed var(--grid); }
+.keypad { display: grid; grid-template-columns: repeat(3, 46px); gap: 5px; justify-content: center; margin: 4px 0 10px; }
+.keypad .key {
+  display: flex; align-items: center; justify-content: center; height: 36px; border-radius: 7px;
+  border: 1px solid var(--border); border-bottom-width: 3px; background: var(--surface-2);
+  font: 600 15px system-ui, sans-serif; color: var(--ink); transition: transform .05s;
+}
+.keypad .key.on { border-color: var(--accent); transform: translateY(1px); }
+.keypad .space { grid-column: 1 / -1; font-size: 12px; }
+.keymap { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 12px; margin: 0; }
+.keymap dt { font-weight: 600; color: var(--ink); }
+.keymap dd { margin: 0; color: var(--ink-2); }
+.mode-seg button { padding: 5px 4px; }
+.sw-row { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
+.sw-row span {
+  width: 27px; height: 27px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  font: 600 12px system-ui, sans-serif; color: var(--ink-2); background: var(--surface-2); border: 1px solid var(--border);
+}
+.sw-row span.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.sw-row span.busy { outline: 2px solid var(--accent); outline-offset: 1px; }
 .evlog {
   position: absolute; right: 16px; bottom: 16px; max-width: 380px; padding: 8px 12px; border-radius: 8px;
   background: rgba(18, 18, 20, 0.72); color: #e8e7e1; font-size: 12px; line-height: 1.5;
